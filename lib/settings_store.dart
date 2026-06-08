@@ -18,9 +18,7 @@ class TranslationSettings {
   final String model;
 
   bool get isReady =>
-      endpoint.trim().isNotEmpty &&
-      apiKey.trim().isNotEmpty &&
-      model.trim().isNotEmpty;
+      endpoint.trim().isNotEmpty && model.trim().isNotEmpty;
 
   TranslationSettings copyWith({
     String? endpoint,

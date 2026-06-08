@@ -6,6 +6,7 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var translationActivity: Any?
+  private let pipController = TranslationPipController()
 
   override func application(
     _ application: UIApplication,
@@ -34,6 +35,29 @@ import UIKit
         self.updateLiveActivity(call.arguments, result: result)
       case "end":
         self.endLiveActivity(result)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
+    let pipChannel = FlutterMethodChannel(
+      name: "ai_voice_translator/pip",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    pipChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterError(code: "app_delegate_unavailable", message: nil, details: nil))
+        return
+      }
+      switch call.method {
+      case "isSupported":
+        result(self.pipController.isSupported)
+      case "start":
+        self.pipController.start(call.arguments, result: result)
+      case "update":
+        self.pipController.update(call.arguments, result: result)
+      case "stop":
+        self.pipController.stop(result)
       default:
         result(FlutterMethodNotImplemented)
       }

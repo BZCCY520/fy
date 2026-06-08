@@ -16,6 +16,7 @@ import 'package:video_player/video_player.dart';
 import 'ai_translator.dart';
 import 'language_option.dart';
 import 'live_activity_bridge.dart';
+import 'pip_bridge.dart';
 import 'settings_store.dart';
 
 void main() {
@@ -35,11 +36,16 @@ class VoiceTranslatorApp extends StatelessWidget {
         useMaterial3: true,
         brightness: Brightness.dark,
         fontFamily: 'SF Pro Display',
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF7DD3FC),
-          brightness: Brightness.dark,
+        splashFactory: NoSplash.splashFactory,
+        highlightColor: Colors.transparent,
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFFEAF8FF),
+          secondary: Color(0xFF9BE7FF),
+          tertiary: Color(0xFFD8B4FE),
+          surface: Color(0xFF0A1020),
+          onSurface: Colors.white,
         ),
-        scaffoldBackgroundColor: const Color(0xFF070A16),
+        scaffoldBackgroundColor: const Color(0xFF08101E),
       ),
       home: const VoiceTranslatorHomePage(),
     );
@@ -73,6 +79,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
   final _settingsStore = SettingsStore();
   final _translator = AiTranslator();
   final _liveActivity = LiveActivityBridge();
+  final _pipBridge = PipBridge();
 
   late final AnimationController _pulseController;
 
@@ -91,6 +98,8 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
   bool _continuousVideoTranslation = false;
   bool _videoLoading = false;
   bool _captionVisible = true;
+  bool _pipEnabled = false;
+  bool _pipSupported = false;
   int _mode = 1;
   double _soundLevel = 0;
   String _statusText = '正在准备语音识别…';
@@ -109,6 +118,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
       duration: const Duration(milliseconds: 1800),
     )..repeat(reverse: true);
     unawaited(_loadSettings());
+    unawaited(_loadPipSupport());
     unawaited(_configureTts());
     unawaited(_initializeSpeech());
     unawaited(_liveActivity.configureAudioSession());
@@ -122,7 +132,18 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
     _videoController?.removeListener(_onVideoChanged);
     _videoController?.dispose();
     unawaited(_liveActivity.end());
+    unawaited(_pipBridge.stop());
     super.dispose();
+  }
+
+  Future<void> _loadPipSupport() async {
+    final supported = await _pipBridge.isSupported();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _pipSupported = supported;
+    });
   }
 
   Future<void> _loadSettings() async {
@@ -214,10 +235,12 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
       _isListening = false;
       _autoTranslateAfterStop = false;
       _continuousVideoTranslation = false;
+      _pipEnabled = false;
       _statusText = '声音提取中断';
       _errorText = '${error.errorMsg}${error.permanent ? '（永久错误）' : ''}';
     });
     unawaited(_liveActivity.end());
+    unawaited(_pipBridge.stop());
   }
 
   void _handleSpeechResult(SpeechRecognitionResult result) {
@@ -236,6 +259,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
 
     if (_continuousVideoTranslation) {
       unawaited(_pushLiveActivity(status: '正在听译'));
+      unawaited(_pushPip(status: '正在听译'));
       if (result.finalResult) {
         unawaited(_translateAndMaybeResumeVideoListening());
       }
@@ -375,9 +399,10 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
     if (!_settings.isReady) {
       setState(() {
         _statusText = '需要先配置 AI 翻译接口';
-        _errorText = '请点击右上角设置，填写 OpenAI-compatible API Key、Endpoint 和 Model。';
+        _errorText = '请点击右上角设置，填写 Endpoint 和 Model。API Key 可留空用于无鉴权网关。';
       });
       await _pushLiveActivity(status: '待配置 AI');
+      await _pushPip(status: '待配置 AI');
       return;
     }
 
@@ -387,6 +412,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
       _statusText = _continuousVideoTranslation ? 'AI 正在生成字幕…' : 'AI 正在翻译…';
     });
     await _pushLiveActivity(status: 'AI 翻译中');
+    await _pushPip(status: 'AI 翻译中');
 
     try {
       final translated = await _translator.translate(
@@ -415,6 +441,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
         _statusText = _continuousVideoTranslation ? '字幕已更新' : '翻译完成';
       });
       await _pushLiveActivity(status: '字幕已更新');
+      await _pushPip(status: '字幕已更新');
     } catch (error) {
       if (!mounted) {
         return;
@@ -424,6 +451,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
         _statusText = '翻译失败';
       });
       await _pushLiveActivity(status: '翻译失败');
+      await _pushPip(status: '翻译失败');
     } finally {
       if (mounted) {
         setState(() {
@@ -554,6 +582,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
         _statusText = '视频已暂停';
       });
       await _pushLiveActivity(status: '视频已暂停');
+      await _pushPip(status: '视频已暂停');
     } else {
       await controller.play();
       setState(() {
@@ -565,6 +594,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
       await _pushLiveActivity(
         status: _continuousVideoTranslation ? '视频听译中' : '视频播放中',
       );
+      await _pushPip(status: _continuousVideoTranslation ? '视频听译中' : '视频播放中');
     }
   }
 
@@ -595,6 +625,15 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
       transcript: _transcript,
       translation: _translation,
     );
+    if (_pipEnabled) {
+      await _pipBridge.start(
+        sourceLanguage: _sourceLanguage.nativeName,
+        targetLanguage: _targetLanguage.nativeName,
+        status: '视频听译中',
+        transcript: _transcript,
+        translation: _translation,
+      );
+    }
     await _startListening(continuousVideo: true);
   }
 
@@ -608,10 +647,43 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
     if (!silent && wasActive && mounted) {
       setState(() {
         _isListening = false;
+        _pipEnabled = false;
         _statusText = '视频听译已停止';
       });
+    } else {
+      _pipEnabled = false;
     }
     await _liveActivity.end();
+    await _pipBridge.stop();
+  }
+
+  Future<void> _togglePipMode() async {
+    HapticFeedback.selectionClick();
+    if (!_pipSupported) {
+      setState(() {
+        _errorText = '当前设备或运行环境不支持系统画中画。请在 iPhone/iPad 真机上验证。';
+      });
+      return;
+    }
+
+    final next = !_pipEnabled;
+    setState(() {
+      _pipEnabled = next;
+      _statusText = next ? '后台小窗已开启' : '后台小窗已关闭';
+      _errorText = null;
+    });
+
+    if (next) {
+      await _pipBridge.start(
+        sourceLanguage: _sourceLanguage.nativeName,
+        targetLanguage: _targetLanguage.nativeName,
+        status: _continuousVideoTranslation ? '视频听译中' : '后台小窗已开启',
+        transcript: _transcript,
+        translation: _translation,
+      );
+    } else {
+      await _pipBridge.stop();
+    }
   }
 
   void _swapLanguages() {
@@ -687,13 +759,26 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
     );
   }
 
+  Future<void> _pushPip({required String status}) async {
+    if (!_pipEnabled) {
+      return;
+    }
+    await _pipBridge.update(
+      sourceLanguage: _sourceLanguage.nativeName,
+      targetLanguage: _targetLanguage.nativeName,
+      status: status,
+      transcript: _transcript,
+      translation: _translation,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     return Scaffold(
       body: Stack(
         children: [
-          const _AuroraBackground(),
+          _AuroraBackground(animation: _pulseController),
           SafeArea(
             child: CustomScrollView(
               physics: const BouncingScrollPhysics(),
@@ -723,6 +808,14 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
                         onPickSource: () => _pickLanguage(source: true),
                         onPickTarget: () => _pickLanguage(source: false),
                         onSwap: _swapLanguages,
+                      ),
+                      const SizedBox(height: 16),
+                      _PipControlPanel(
+                        enabled: _pipEnabled,
+                        supported: _pipSupported,
+                        transcript: _transcript,
+                        translation: _translation,
+                        onToggle: _togglePipMode,
                       ),
                       const SizedBox(height: 16),
                       if (_mode == 1)
@@ -815,38 +908,89 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '声译 AI',
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -1.2,
-                  color: Colors.white,
-                ),
+    return _GlassPanel(
+      radius: 34,
+      padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
+      tint: Colors.white.withValues(alpha: 0.075),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withValues(alpha: 0.95),
+                  const Color(0xFFBEEBFF).withValues(alpha: 0.78),
+                  const Color(0xFFB794F6).withValues(alpha: 0.68),
+                ],
               ),
-              const SizedBox(height: 6),
-              Text(
-                '视频听译 · 悬浮字幕 · 灵动岛接口',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.62),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.55)),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF7DD3FC).withValues(alpha: 0.28),
+                  blurRadius: 28,
+                  offset: const Offset(0, 10),
                 ),
+              ],
+            ),
+            child: const Icon(
+              CupertinoIcons.waveform_path_badge_plus,
+              color: Color(0xFF07111F),
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ShaderMask(
+                  shaderCallback: (bounds) => const LinearGradient(
+                    colors: [
+                      Colors.white,
+                      Color(0xFFDDF7FF),
+                      Color(0xFFE9D5FF),
+                    ],
+                  ).createShader(bounds),
+                  child: Text(
+                    '声译 AI',
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -1.1,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Liquid Glass · 实时字幕 · 灵动岛接口',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.62),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _ConnectionPill(connected: connected),
+              const SizedBox(height: 8),
+              _GlassIconButton(
+                icon: CupertinoIcons.slider_horizontal_3,
+                tooltip: '设置',
+                onTap: onSettings,
               ),
             ],
           ),
-        ),
-        _ConnectionPill(connected: connected),
-        const SizedBox(width: 10),
-        _GlassIconButton(
-          icon: CupertinoIcons.slider_horizontal_3,
-          tooltip: '设置',
-          onTap: onSettings,
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -865,7 +1009,7 @@ class _ModeSwitch extends StatelessWidget {
       child: CupertinoSlidingSegmentedControl<int>(
         groupValue: value,
         backgroundColor: Colors.transparent,
-        thumbColor: Colors.white.withValues(alpha: 0.22),
+        thumbColor: Colors.white.withValues(alpha: 0.26),
         children: const {
           0: Padding(
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -895,7 +1039,10 @@ class _ConnectionPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return _GlassPanel(
       radius: 999,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+      tint: (connected ? const Color(0xFFBFFFE7) : const Color(0xFFFFE5B4))
+          .withValues(alpha: 0.14),
+      borderAlpha: connected ? 0.30 : 0.24,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -922,7 +1069,7 @@ class _ConnectionPill extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Text(
-            connected ? 'AI 已连接' : '待配置',
+            connected ? '已连接' : '待配置',
             style: const TextStyle(
               color: Colors.white,
               fontSize: 12,
@@ -953,7 +1100,8 @@ class _LanguageBridge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _GlassPanel(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
+      radius: 32,
       child: Row(
         children: [
           Expanded(
@@ -1003,52 +1151,210 @@ class _LanguageChip extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: Column(
-        crossAxisAlignment: alignEnd
-            ? CrossAxisAlignment.end
-            : CrossAxisAlignment.start,
+      child: _LiquidSurface(
+        radius: 24,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        tint: Colors.white.withValues(alpha: 0.055),
+        child: Column(
+          crossAxisAlignment: alignEnd
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            Text(
+              eyebrow,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.48),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Row(
+              mainAxisAlignment: alignEnd
+                  ? MainAxisAlignment.end
+                  : MainAxisAlignment.start,
+              children: [
+                Flexible(
+                  child: Text(
+                    language.nativeName,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.4,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  CupertinoIcons.chevron_down,
+                  size: 15,
+                  color: Colors.white.withValues(alpha: 0.62),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              language.name,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.5),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PipControlPanel extends StatelessWidget {
+  const _PipControlPanel({
+    required this.enabled,
+    required this.supported,
+    required this.transcript,
+    required this.translation,
+    required this.onToggle,
+  });
+
+  final bool enabled;
+  final bool supported;
+  final String transcript;
+  final String translation;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = translation.trim().isNotEmpty
+        ? translation.trim()
+        : (transcript.trim().isNotEmpty
+              ? transcript.trim()
+              : '识别与翻译结果会同步显示在系统画中画小窗。');
+    return _GlassPanel(
+      radius: 32,
+      padding: const EdgeInsets.all(14),
+      tint: (enabled ? const Color(0xFFBFFFE7) : Colors.white).withValues(
+        alpha: enabled ? 0.12 : 0.075,
+      ),
+      borderAlpha: enabled ? 0.34 : 0.20,
+      child: Row(
         children: [
-          Text(
-            eyebrow,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.48),
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+          _LiquidSurface(
+            radius: 22,
+            padding: EdgeInsets.zero,
+            tint: Colors.white.withValues(alpha: 0.09),
+            child: SizedBox(
+              width: 48,
+              height: 48,
+              child: Icon(
+                enabled
+                    ? CupertinoIcons.rectangle_fill_on_rectangle_fill
+                    : CupertinoIcons.rectangle_on_rectangle,
+                color: supported
+                    ? Colors.white
+                    : Colors.white.withValues(alpha: 0.38),
+                size: 22,
+              ),
             ),
           ),
-          const SizedBox(height: 5),
-          Row(
-            mainAxisAlignment: alignEnd
-                ? MainAxisAlignment.end
-                : MainAxisAlignment.start,
-            children: [
-              Flexible(
-                child: Text(
-                  language.nativeName,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        enabled ? '后台小窗已开启' : '后台小窗 / 画中画',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color:
+                            (supported
+                                    ? const Color(0xFF34D399)
+                                    : const Color(0xFFFFB86B))
+                                .withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        supported ? 'PiP' : '需真机',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.78),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  preview,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.4,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.52),
+                    fontSize: 12,
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          GestureDetector(
+            onTap: onToggle,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              width: 54,
+              height: 32,
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                color: (enabled ? const Color(0xFF34D399) : Colors.white)
+                    .withValues(alpha: enabled ? 0.30 : 0.12),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: enabled ? 0.36 : 0.18),
+                ),
+              ),
+              child: Align(
+                alignment: enabled
+                    ? Alignment.centerRight
+                    : Alignment.centerLeft,
+                child: Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: supported
+                        ? Colors.white.withValues(alpha: 0.94)
+                        : Colors.white.withValues(alpha: 0.48),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.22),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(width: 6),
-              Icon(
-                CupertinoIcons.chevron_down,
-                size: 15,
-                color: Colors.white.withValues(alpha: 0.62),
-              ),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Text(
-            language.name,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.5),
-              fontSize: 12,
             ),
           ),
         ],
@@ -1100,6 +1406,7 @@ class _VideoTranslatePanel extends StatelessWidget {
     final playing = controller?.value.isPlaying ?? false;
     return _GlassPanel(
       padding: const EdgeInsets.all(14),
+      radius: 34,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1126,60 +1433,77 @@ class _VideoTranslatePanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: AspectRatio(
-              aspectRatio: ready
-                  ? math.max(0.8, controller!.value.aspectRatio)
-                  : 16 / 9,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  return Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Container(
-                        color: Colors.black.withValues(alpha: 0.52),
-                        child: ready
-                            ? VideoPlayer(controller!)
-                            : Center(
-                                child: videoLoading
-                                    ? const CupertinoActivityIndicator(
-                                        color: Colors.white,
-                                      )
-                                    : Icon(
-                                        CupertinoIcons.play_rectangle_fill,
-                                        size: 54,
-                                        color: Colors.white.withValues(
-                                          alpha: 0.42,
+          _LiquidSurface(
+            radius: 28,
+            padding: const EdgeInsets.all(1.2),
+            tint: Colors.white.withValues(alpha: 0.045),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(27),
+              child: AspectRatio(
+                aspectRatio: ready
+                    ? math.max(0.8, controller!.value.aspectRatio)
+                    : 16 / 9,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.44),
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                const Color(0xFF0B1224),
+                                Colors.black.withValues(alpha: 0.72),
+                                const Color(0xFF15112A),
+                              ],
+                            ),
+                          ),
+                          child: ready
+                              ? VideoPlayer(controller!)
+                              : Center(
+                                  child: videoLoading
+                                      ? const CupertinoActivityIndicator(
+                                          color: Colors.white,
+                                        )
+                                      : Icon(
+                                          CupertinoIcons.play_rectangle_fill,
+                                          size: 58,
+                                          color: Colors.white.withValues(
+                                            alpha: 0.42,
+                                          ),
                                         ),
-                                      ),
-                              ),
-                      ),
-                      if (captionVisible)
-                        _FloatingCaption(
-                          offset: captionOffset,
-                          maxSize: constraints.biggest,
-                          active: active,
-                          translating: translating,
-                          transcript: transcript,
-                          translation: translation,
-                          onDrag: onCaptionDrag,
+                                ),
                         ),
-                      Positioned(
-                        left: 12,
-                        right: 12,
-                        bottom: 12,
-                        child: _VideoControlsBar(
-                          controller: controller,
-                          ready: ready,
-                          playing: playing,
-                          active: active,
-                          onPlayPause: onPlayPause,
+                        const _GlassSheen(radius: 27),
+                        if (captionVisible)
+                          _FloatingCaption(
+                            offset: captionOffset,
+                            maxSize: constraints.biggest,
+                            active: active,
+                            translating: translating,
+                            transcript: transcript,
+                            translation: translation,
+                            onDrag: onCaptionDrag,
+                          ),
+                        Positioned(
+                          left: 12,
+                          right: 12,
+                          bottom: 12,
+                          child: _VideoControlsBar(
+                            controller: controller,
+                            ready: ready,
+                            playing: playing,
+                            active: active,
+                            onPlayPause: onPlayPause,
+                          ),
                         ),
-                      ),
-                    ],
-                  );
-                },
+                      ],
+                    );
+                  },
+                ),
               ),
             ),
           ),
@@ -1247,7 +1571,8 @@ class _VideoControlsBar extends StatelessWidget {
     return _GlassPanel(
       radius: 999,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      tint: Colors.black.withValues(alpha: 0.34),
+      tint: Colors.black.withValues(alpha: 0.28),
+      borderAlpha: 0.30,
       child: Row(
         children: [
           GestureDetector(
@@ -1275,8 +1600,9 @@ class _VideoControlsBar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
               color: (active ? const Color(0xFF34D399) : Colors.white)
-                  .withValues(alpha: active ? 0.24 : 0.10),
+                  .withValues(alpha: active ? 0.30 : 0.11),
               borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
             ),
             child: Text(
               active ? '字幕中' : '待机',
@@ -1333,10 +1659,10 @@ class _FloatingCaption extends StatelessWidget {
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxWidth),
           child: _GlassPanel(
-            radius: 22,
+            radius: 24,
             padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
-            tint: Colors.black.withValues(alpha: 0.42),
-            borderAlpha: 0.24,
+            tint: Colors.black.withValues(alpha: 0.34),
+            borderAlpha: 0.34,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1424,6 +1750,7 @@ class _RecorderPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final level = (soundLevel.clamp(-2, 10) + 2) / 12;
     return _GlassPanel(
+      radius: 36,
       padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
       child: Column(
         children: [
@@ -1446,44 +1773,53 @@ class _RecorderPanel extends StatelessWidget {
             },
             child: GestureDetector(
               onTap: onToggle,
-              child: Container(
-                width: 132,
-                height: 132,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: isListening
-                        ? [
-                            const Color(0xFFFFFFFF),
-                            const Color(0xFF9BE7FF),
-                            const Color(0xFF7C3AED),
-                          ]
-                        : [
-                            const Color(0xFFFFFFFF).withValues(alpha: 0.92),
-                            const Color(0xFFBEEBFF).withValues(alpha: 0.82),
-                            const Color(0xFF778BFF).withValues(alpha: 0.72),
-                          ],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color:
-                          (isListening
-                                  ? const Color(0xFF67E8F9)
-                                  : const Color(0xFF93C5FD))
-                              .withValues(alpha: 0.46),
-                      blurRadius: isListening ? 46 : 28,
-                      spreadRadius: isListening ? 10 : 2,
-                    ),
-                  ],
-                ),
+              child: _LiquidOrb(
+                size: 132,
+                active: isListening,
                 child: Icon(
                   isListening
                       ? CupertinoIcons.stop_fill
                       : CupertinoIcons.mic_fill,
                   size: 44,
-                  color: const Color(0xFF07111F),
+                  color: const Color(0xFF07111F).withValues(alpha: 0.92),
                 ),
               ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: Stack(
+              children: [
+                Container(
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  height: 8,
+                  width: 70 + level * 180,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        const Color(0xFFBEEBFF).withValues(alpha: 0.9),
+                        const Color(0xFFE9D5FF).withValues(alpha: 0.86),
+                        const Color(0xFF86EFAC).withValues(alpha: 0.8),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF7DD3FC).withValues(alpha: 0.28),
+                        blurRadius: 16,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 22),
@@ -1534,40 +1870,69 @@ class _LiquidActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = enabled
-        ? (subtle ? Colors.white.withValues(alpha: 0.13) : Colors.white)
-        : Colors.white.withValues(alpha: 0.08);
     final foreground = subtle || !enabled
-        ? Colors.white
+        ? Colors.white.withValues(alpha: enabled ? 0.92 : 0.42)
         : const Color(0xFF07111F);
     return GestureDetector(
       onTap: enabled ? onTap : null,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: subtle ? 0.18 : 0.42),
+      child: AnimatedScale(
+        duration: const Duration(milliseconds: 180),
+        scale: enabled ? 1 : 0.995,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            gradient: enabled && !subtle
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFFFFFFFF),
+                      Color(0xFFCFF5FF),
+                      Color(0xFFE9D5FF),
+                    ],
+                  )
+                : null,
+            color: enabled
+                ? (subtle ? Colors.white.withValues(alpha: 0.105) : null)
+                : Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: enabled ? 0.36 : 0.12),
+            ),
+            boxShadow: enabled
+                ? [
+                    BoxShadow(
+                      color: (subtle ? Colors.black : const Color(0xFF7DD3FC))
+                          .withValues(alpha: subtle ? 0.16 : 0.24),
+                      blurRadius: subtle ? 16 : 28,
+                      offset: const Offset(0, 12),
+                    ),
+                    BoxShadow(
+                      color: Colors.white.withValues(alpha: 0.20),
+                      blurRadius: 1,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
           ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: foreground, size: 18),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                label,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: foreground,
-                  fontWeight: FontWeight.w800,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: foreground, size: 18),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: foreground,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1595,20 +1960,26 @@ class _GlassTextPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasText = text.trim().isNotEmpty;
     return _GlassPanel(
+      radius: 34,
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withValues(alpha: 0.12),
+              _LiquidSurface(
+                radius: 999,
+                padding: EdgeInsets.zero,
+                tint: Colors.white.withValues(alpha: 0.08),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: 0.04),
+                  ),
+                  child: Icon(icon, color: Colors.white, size: 19),
                 ),
-                child: Icon(icon, color: Colors.white, size: 19),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1905,7 +2276,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           ),
           const SizedBox(height: 8),
           Text(
-            '兼容 Chat Completions 格式。默认 Endpoint 可用于 OpenAI，也可替换为你的私有网关。',
+            '兼容 Chat Completions 格式。默认 Endpoint 可用于 OpenAI，也可替换为你的私有网关；API Key 留空时将不发送 Authorization 鉴权头。',
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.56),
               height: 1.35,
@@ -1922,7 +2293,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           _GlassTextField(
             label: 'API Key',
             controller: _apiKeyController,
-            placeholder: 'sk-...',
+            placeholder: '可留空；填写 sk-... 时使用 Bearer 鉴权',
             obscureText: _hideKey,
             suffix: IconButton(
               onPressed: () => setState(() => _hideKey = !_hideKey),
@@ -2054,22 +2425,26 @@ class _GlassTextField extends StatelessWidget {
             filled: true,
             fillColor: Colors.white.withValues(alpha: 0.09),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(24),
               borderSide: BorderSide(
-                color: Colors.white.withValues(alpha: 0.12),
+                color: Colors.white.withValues(alpha: 0.16),
               ),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(24),
               borderSide: BorderSide(
-                color: Colors.white.withValues(alpha: 0.12),
+                color: Colors.white.withValues(alpha: 0.16),
               ),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(24),
               borderSide: BorderSide(
-                color: Colors.white.withValues(alpha: 0.42),
+                color: Colors.white.withValues(alpha: 0.52),
               ),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 15,
             ),
           ),
         ),
@@ -2089,7 +2464,10 @@ class _BottomGlassSheet extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.fromLTRB(12, 0, 12, math.max(12, bottom + 12)),
       child: _GlassPanel(
-        radius: 34,
+        radius: 38,
+        blur: 36,
+        tint: Colors.white.withValues(alpha: 0.13),
+        borderAlpha: 0.36,
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
         child: child,
       ),
@@ -2114,15 +2492,230 @@ class _GlassIconButton extends StatelessWidget {
       message: tooltip,
       child: GestureDetector(
         onTap: onTap,
-        child: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.11),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.20)),
+        child: _LiquidSurface(
+          radius: 999,
+          padding: EdgeInsets.zero,
+          tint: Colors.white.withValues(alpha: 0.10),
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Icon(icon, color: Colors.white, size: 20),
           ),
-          child: Icon(icon, color: Colors.white, size: 20),
+        ),
+      ),
+    );
+  }
+}
+
+class _LiquidSurface extends StatelessWidget {
+  const _LiquidSurface({
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+    this.radius = 28,
+    this.tint,
+    this.borderAlpha = 0.22,
+    this.blur = 28,
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final double radius;
+  final Color? tint;
+  final double borderAlpha;
+  final double blur;
+
+  @override
+  Widget build(BuildContext context) {
+    final baseTint = tint ?? Colors.white.withValues(alpha: 0.095);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+        child: Container(
+          decoration: BoxDecoration(
+            color: baseTint,
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: borderAlpha),
+            ),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white.withValues(alpha: 0.15),
+                baseTint,
+                Colors.white.withValues(alpha: 0.035),
+              ],
+              stops: const [0, 0.46, 1],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.26),
+                blurRadius: 34,
+                offset: const Offset(0, 18),
+              ),
+              BoxShadow(
+                color: Colors.white.withValues(alpha: 0.13),
+                blurRadius: 1.2,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              Positioned.fill(child: _GlassSheen(radius: radius)),
+              Padding(padding: padding, child: child),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GlassSheen extends StatelessWidget {
+  const _GlassSheen({required this.radius});
+
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(radius),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withValues(alpha: 0.34),
+                      Colors.white.withValues(alpha: 0.035),
+                      Colors.white.withValues(alpha: 0.11),
+                      Colors.transparent,
+                    ],
+                    stops: const [0, 0.22, 0.58, 1],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 1,
+              left: 10,
+              right: 22,
+              height: 1.2,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.transparent,
+                      Colors.white.withValues(alpha: 0.62),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 10,
+              bottom: 18,
+              left: 1,
+              width: 1.1,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.white.withValues(alpha: 0.30),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LiquidOrb extends StatelessWidget {
+  const _LiquidOrb({
+    required this.size,
+    required this.active,
+    required this.child,
+  });
+
+  final double size;
+  final bool active;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return _LiquidSurface(
+      radius: 999,
+      padding: EdgeInsets.zero,
+      blur: 34,
+      tint: Colors.white.withValues(alpha: active ? 0.22 : 0.16),
+      borderAlpha: active ? 0.58 : 0.42,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            center: const Alignment(-0.38, -0.48),
+            radius: 0.98,
+            colors: active
+                ? const [
+                    Color(0xFFFFFFFF),
+                    Color(0xFFCFF5FF),
+                    Color(0xFFB794F6),
+                    Color(0xFF60A5FA),
+                  ]
+                : [
+                    Colors.white.withValues(alpha: 0.96),
+                    const Color(0xFFDDF7FF).withValues(alpha: 0.88),
+                    const Color(0xFFC4B5FD).withValues(alpha: 0.74),
+                    const Color(0xFF60A5FA).withValues(alpha: 0.58),
+                  ],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color:
+                  (active ? const Color(0xFF67E8F9) : const Color(0xFF93C5FD))
+                      .withValues(alpha: active ? 0.48 : 0.32),
+              blurRadius: active ? 52 : 34,
+              spreadRadius: active ? 10 : 2,
+            ),
+          ],
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned(
+              top: size * 0.16,
+              left: size * 0.22,
+              child: Container(
+                width: size * 0.22,
+                height: size * 0.10,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.58),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            child,
+          ],
         ),
       ),
     );
@@ -2136,6 +2729,7 @@ class _GlassPanel extends StatelessWidget {
     this.radius = 28,
     this.tint,
     this.borderAlpha = 0.18,
+    this.blur = 28,
   });
 
   final Widget child;
@@ -2143,83 +2737,91 @@ class _GlassPanel extends StatelessWidget {
   final double radius;
   final Color? tint;
   final double borderAlpha;
+  final double blur;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: tint ?? Colors.white.withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(radius),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: borderAlpha),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.24),
-                blurRadius: 32,
-                offset: const Offset(0, 18),
-              ),
-              BoxShadow(
-                color: Colors.white.withValues(alpha: 0.05),
-                blurRadius: 1,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
-          child: child,
-        ),
-      ),
+    return _LiquidSurface(
+      radius: radius,
+      padding: padding,
+      tint: tint ?? Colors.white.withValues(alpha: 0.095),
+      borderAlpha: borderAlpha,
+      blur: blur,
+      child: child,
     );
   }
 }
 
 class _AuroraBackground extends StatelessWidget {
-  const _AuroraBackground();
+  const _AuroraBackground({required this.animation});
+
+  final Animation<double> animation;
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF07111F), Color(0xFF101331), Color(0xFF050711)],
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        final t = animation.value;
+        return Stack(
+          children: [
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF08101E),
+                    Color(0xFF111827),
+                    Color(0xFF17122C),
+                    Color(0xFF05070E),
+                  ],
+                  stops: [0, 0.38, 0.70, 1],
+                ),
+              ),
+              child: SizedBox.expand(),
             ),
-          ),
-          child: SizedBox.expand(),
-        ),
-        Positioned(
-          top: -90,
-          left: -70,
-          child: _BlurBlob(
-            size: 260,
-            color: const Color(0xFF38BDF8).withValues(alpha: 0.36),
-          ),
-        ),
-        Positioned(
-          top: 120,
-          right: -90,
-          child: _BlurBlob(
-            size: 280,
-            color: const Color(0xFFA855F7).withValues(alpha: 0.34),
-          ),
-        ),
-        Positioned(
-          bottom: -120,
-          left: 40,
-          child: _BlurBlob(
-            size: 320,
-            color: const Color(0xFF22C55E).withValues(alpha: 0.18),
-          ),
-        ),
-      ],
+            Positioned.fill(
+              child: Opacity(
+                opacity: 0.28,
+                child: CustomPaint(painter: _LiquidMeshPainter(t)),
+              ),
+            ),
+            Positioned(
+              top: -92 + 18 * t,
+              left: -78 + 10 * t,
+              child: _BlurBlob(
+                size: 300,
+                color: const Color(0xFF38BDF8).withValues(alpha: 0.38),
+              ),
+            ),
+            Positioned(
+              top: 116 - 16 * t,
+              right: -110 + 22 * t,
+              child: _BlurBlob(
+                size: 320,
+                color: const Color(0xFFC084FC).withValues(alpha: 0.34),
+              ),
+            ),
+            Positioned(
+              bottom: -130 + 14 * t,
+              left: 28 + 18 * t,
+              child: _BlurBlob(
+                size: 360,
+                color: const Color(0xFF67E8F9).withValues(alpha: 0.16),
+              ),
+            ),
+            Positioned(
+              bottom: 130,
+              right: -90,
+              child: _BlurBlob(
+                size: 240,
+                color: const Color(0xFF86EFAC).withValues(alpha: 0.12),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -2241,6 +2843,56 @@ class _BlurBlob extends StatelessWidget {
       ),
     );
   }
+}
+
+class _LiquidMeshPainter extends CustomPainter {
+  const _LiquidMeshPainter(this.t);
+
+  final double t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final linePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.7
+      ..color = Colors.white.withValues(alpha: 0.07);
+    const step = 38.0;
+    final drift = t * step * 0.35;
+
+    for (double x = -step + drift; x < size.width + step; x += step) {
+      final path = Path()..moveTo(x, 0);
+      for (double y = 0; y <= size.height; y += step) {
+        final wave = math.sin((y / 80) + t * math.pi * 2) * 4;
+        path.lineTo(x + wave, y);
+      }
+      canvas.drawPath(path, linePaint);
+    }
+
+    for (double y = -step - drift; y < size.height + step; y += step) {
+      final path = Path()..moveTo(0, y);
+      for (double x = 0; x <= size.width; x += step) {
+        final wave = math.cos((x / 88) + t * math.pi * 2) * 3.5;
+        path.lineTo(x, y + wave);
+      }
+      canvas.drawPath(path, linePaint);
+    }
+
+    final sparklePaint = Paint()..style = PaintingStyle.fill;
+    final points = <Offset>[
+      Offset(size.width * 0.18, size.height * (0.20 + 0.03 * t)),
+      Offset(size.width * 0.78, size.height * (0.30 - 0.02 * t)),
+      Offset(size.width * 0.66, size.height * (0.74 + 0.02 * t)),
+      Offset(size.width * 0.30, size.height * (0.86 - 0.02 * t)),
+    ];
+    for (var i = 0; i < points.length; i++) {
+      sparklePaint.color = Colors.white.withValues(alpha: 0.10 - i * 0.012);
+      canvas.drawCircle(points[i], 1.8 + i * 0.35, sparklePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _LiquidMeshPainter oldDelegate) =>
+      oldDelegate.t != t;
 }
 
 String _formatDuration(Duration duration) {
