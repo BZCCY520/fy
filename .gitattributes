@@ -1,0 +1,16 @@
+* text=auto
+
+*.dart text eol=lf
+*.swift text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.plist text eol=lf
+*.pbxproj text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ipa binary

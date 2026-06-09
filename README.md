@@ -22,6 +22,13 @@ flutter run
 
 iOS 真机需要在 Xcode 中配置 Apple Developer Team。
 
+## 使用与排错
+
+- 私有网关不需要鉴权时，`API Key` 可以留空；应用不会发送 `Authorization` 请求头。
+- 语音识别偶发 `error_no_match` 表示本轮没有听到清晰语音，应用会自动当作可恢复状态处理；视频听译模式会继续监听。
+- 如果系统画中画启动失败，主界面字幕和 Live Activity 仍可继续使用。
+- 建议真机测试麦克风、语音识别、后台音频、画中画和灵动岛能力。
+
 ## GitHub 构建 IPA
 
 已添加 workflow：`.github/workflows/build-ios-ipa.yml`

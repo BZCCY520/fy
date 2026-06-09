@@ -94,6 +94,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
   bool _settingsLoaded = false;
   bool _isListening = false;
   bool _isTranslating = false;
+  bool _speechStartInProgress = false;
   bool _autoTranslateAfterStop = false;
   bool _continuousVideoTranslation = false;
   bool _videoLoading = false;
@@ -204,6 +205,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
     final shouldTranslateContinuously =
         _continuousVideoTranslation &&
         !_speech.isListening &&
+        !_speechStartInProgress &&
         !_isTranslating &&
         _transcript.trim().isNotEmpty &&
         _transcript.trim() != _lastTranslatedSource;
@@ -231,6 +233,30 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
     if (!mounted) {
       return;
     }
+
+    if (_isNoMatchSpeechError(error)) {
+      final shouldTranslateExisting =
+          _autoTranslateAfterStop && _transcript.trim().isNotEmpty;
+      final shouldKeepVideoListening = _continuousVideoTranslation;
+      setState(() {
+        _isListening = false;
+        _autoTranslateAfterStop = false;
+        _errorText = null;
+        _statusText = shouldKeepVideoListening
+            ? '暂未识别到清晰声音，继续监听…'
+            : '没有识别到语音，请靠近麦克风再试';
+      });
+
+      if (shouldTranslateExisting) {
+        unawaited(_translateTranscript());
+      } else if (shouldKeepVideoListening) {
+        unawaited(_restartVideoListeningAfterNoMatch());
+        unawaited(_pushLiveActivity(status: '等待清晰声音'));
+        unawaited(_pushPip(status: '等待清晰声音'));
+      }
+      return;
+    }
+
     setState(() {
       _isListening = false;
       _autoTranslateAfterStop = false;
@@ -241,6 +267,29 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
     });
     unawaited(_liveActivity.end());
     unawaited(_pipBridge.stop());
+  }
+
+  bool _isNoMatchSpeechError(SpeechRecognitionError error) {
+    final message = error.errorMsg.toLowerCase();
+    return message == 'error_no_match' ||
+        message.contains('error_no_match') ||
+        message.contains('no_match');
+  }
+
+  Future<void> _restartVideoListeningAfterNoMatch() async {
+    await Future<void>.delayed(const Duration(milliseconds: 650));
+    final controller = _videoController;
+    if (!mounted ||
+        !_continuousVideoTranslation ||
+        _speech.isListening ||
+        _speechStartInProgress ||
+        _isTranslating ||
+        controller == null ||
+        !controller.value.isInitialized ||
+        !controller.value.isPlaying) {
+      return;
+    }
+    await _startListening(continuousVideo: true, clearText: false);
   }
 
   void _handleSpeechResult(SpeechRecognitionResult result) {
@@ -284,6 +333,9 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
   }
 
   Future<void> _toggleListening() async {
+    if (_speechStartInProgress) {
+      return;
+    }
     HapticFeedback.mediumImpact();
     if (_speech.isListening || _isListening) {
       await _stopListening(translateAfterStop: true);
@@ -296,59 +348,94 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
     bool continuousVideo = false,
     bool clearText = true,
   }) async {
+    if (_speechStartInProgress) {
+      return;
+    }
+    if (_speech.isListening) {
+      if (mounted) {
+        setState(() {
+          _isListening = true;
+          _statusText = continuousVideo ? '视频听译中…' : '正在实时提取声音…';
+        });
+      }
+      return;
+    }
+
+    _speechStartInProgress = true;
     if (!_speechReady) {
       await _initializeSpeech();
     }
     if (!_speechReady) {
+      _speechStartInProgress = false;
       setState(() {
         _errorText = '当前设备没有授权麦克风或语音识别权限。';
       });
       return;
     }
 
-    await _liveActivity.configureAudioSession();
-    await _tts.stop();
-    setState(() {
-      _isListening = true;
-      _isTranslating = false;
-      _autoTranslateAfterStop = !continuousVideo;
-      _continuousVideoTranslation = continuousVideo;
-      _soundLevel = 0;
-      if (clearText) {
-        _transcript = '';
+    try {
+      await _liveActivity.configureAudioSession();
+      await _tts.stop();
+      if (!mounted) {
+        return;
       }
-      if (!continuousVideo) {
-        _translation = '';
-        _lastTranslatedSource = '';
-      }
-      _errorText = null;
-      _statusText = continuousVideo ? '视频听译中…' : '正在实时提取声音…';
-    });
-
-    await _speech.listen(
-      onResult: _handleSpeechResult,
-      onSoundLevelChange: (level) {
-        if (!mounted) {
-          return;
+      setState(() {
+        _isListening = true;
+        _isTranslating = false;
+        _autoTranslateAfterStop = !continuousVideo;
+        _continuousVideoTranslation = continuousVideo;
+        _soundLevel = 0;
+        if (clearText) {
+          _transcript = '';
         }
-        setState(() {
-          _soundLevel = level;
-        });
-      },
-      listenOptions: stt.SpeechListenOptions(
-        localeId: _sourceLanguage.localeId,
-        listenMode: stt.ListenMode.dictation,
-        partialResults: true,
-        autoPunctuation: true,
-        enableHapticFeedback: true,
-        pauseFor: continuousVideo
-            ? const Duration(milliseconds: 1300)
-            : const Duration(seconds: 3),
-        listenFor: continuousVideo
-            ? const Duration(seconds: 18)
-            : const Duration(minutes: 1),
-      ),
-    );
+        if (!continuousVideo) {
+          _translation = '';
+          _lastTranslatedSource = '';
+        }
+        _errorText = null;
+        _statusText = continuousVideo ? '视频听译中…' : '正在实时提取声音…';
+      });
+
+      await _speech.listen(
+        onResult: _handleSpeechResult,
+        onSoundLevelChange: (level) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _soundLevel = level;
+          });
+        },
+        listenOptions: stt.SpeechListenOptions(
+          localeId: _sourceLanguage.localeId,
+          listenMode: stt.ListenMode.dictation,
+          partialResults: true,
+          autoPunctuation: true,
+          enableHapticFeedback: true,
+          pauseFor: continuousVideo
+              ? const Duration(milliseconds: 1500)
+              : const Duration(seconds: 4),
+          listenFor: continuousVideo
+              ? const Duration(seconds: 20)
+              : const Duration(minutes: 1),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isListening = false;
+        _continuousVideoTranslation = false;
+        _autoTranslateAfterStop = false;
+        _statusText = '语音监听启动失败';
+        _errorText = '无法启动语音识别：$error';
+      });
+      await _liveActivity.end();
+      await _pipBridge.stop();
+    } finally {
+      _speechStartInProgress = false;
+    }
   }
 
   Future<void> _stopListening({required bool translateAfterStop}) async {
