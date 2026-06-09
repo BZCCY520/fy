@@ -1,24 +1,13 @@
 import AVFoundation
 import AVKit
-import CoreMedia
-import CoreVideo
 import Flutter
 import UIKit
 
-final class TranslationPipController: NSObject,
-  AVPictureInPictureControllerDelegate,
-  AVPictureInPictureSampleBufferPlaybackDelegate
-{
-  private let renderSize = CGSize(width: 640, height: 360)
-  private var hostView: UIView?
-  private var displayLayer: AVSampleBufferDisplayLayer?
+final class TranslationPipController: NSObject, AVPictureInPictureControllerDelegate {
+  private var sourceView: UIView?
+  private var contentViewController: AVPictureInPictureVideoCallViewController?
+  private var contentView: TranslationPipView?
   private var pipController: AVPictureInPictureController?
-  private var displayLink: CADisplayLink?
-  private var frameRenderer = TranslationFrameRenderer(size: CGSize(width: 640, height: 360))
-  private var timebase: CMTimebase?
-  private var frameIndex: Int64 = 0
-  private var isRunning = false
-  private var isPaused = false
 
   var isSupported: Bool {
     AVPictureInPictureController.isPictureInPictureSupported()
@@ -29,275 +18,103 @@ final class TranslationPipController: NSObject,
       result(false)
       return
     }
-    ensurePipeline()
-    update(rawArguments, result: { _ in })
-    isRunning = true
-    isPaused = false
-    displayLink?.isPaused = false
-    if let timebase {
-      CMTimebaseSetRate(timebase, rate: 1)
-    }
 
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-      guard let self, let pipController = self.pipController else {
-        return
+    do {
+      try ensurePipeline()
+      apply(rawArguments)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+        guard let self = self, let pipController = self.pipController else {
+          return
+        }
+        if !pipController.isPictureInPictureActive {
+          pipController.startPictureInPicture()
+        }
       }
-      if !pipController.isPictureInPictureActive {
-        pipController.startPictureInPicture()
-      }
+      result(true)
+    } catch {
+      result(
+        FlutterError(
+          code: "pip_start_failed",
+          message: error.localizedDescription,
+          details: nil
+        )
+      )
     }
-    result(true)
   }
 
   func update(_ rawArguments: Any?, result: @escaping FlutterResult) {
-    let args = rawArguments as? [String: Any] ?? [:]
-    frameRenderer.state = TranslationPipState(
-      sourceLanguage: stringValue(args, "sourceLanguage", fallback: "Source"),
-      targetLanguage: stringValue(args, "targetLanguage", fallback: "Target"),
-      status: stringValue(args, "status", fallback: "声译 AI"),
-      transcript: stringValue(args, "transcript", fallback: ""),
-      translation: stringValue(args, "translation", fallback: "")
-    )
-    enqueueFrame(displayImmediately: true)
+    apply(rawArguments)
     result(true)
   }
 
   func stop(_ result: @escaping FlutterResult) {
-    isRunning = false
-    isPaused = true
-    displayLink?.isPaused = true
-    if let timebase {
-      CMTimebaseSetRate(timebase, rate: 0)
-    }
-    if let pipController, pipController.isPictureInPictureActive {
+    if let pipController = pipController, pipController.isPictureInPictureActive {
       pipController.stopPictureInPicture()
     }
     result(true)
   }
 
-  private func ensurePipeline() {
+  private func ensurePipeline() throws {
     if pipController != nil {
       return
     }
 
-    let hostView = UIView(frame: CGRect(origin: .zero, size: renderSize))
-    hostView.backgroundColor = .clear
-    hostView.isUserInteractionEnabled = false
-
-    let keyWindow = UIApplication.shared.connectedScenes
-      .compactMap { $0 as? UIWindowScene }
-      .flatMap { $0.windows }
-      .first { $0.isKeyWindow }
-    keyWindow?.insertSubview(hostView, at: 0)
-    self.hostView = hostView
-
-    let displayLayer = AVSampleBufferDisplayLayer()
-    displayLayer.frame = hostView.bounds
-    displayLayer.videoGravity = .resizeAspect
-    hostView.layer.addSublayer(displayLayer)
-    self.displayLayer = displayLayer
-
-    var controlTimebase: CMTimebase?
-    CMTimebaseCreateWithSourceClock(
-      allocator: kCFAllocatorDefault,
-      sourceClock: CMClockGetHostTimeClock(),
-      timebaseOut: &controlTimebase
-    )
-    timebase = controlTimebase
-    if let controlTimebase {
-      CMTimebaseSetTime(controlTimebase, time: .zero)
-      CMTimebaseSetRate(controlTimebase, rate: 1)
-      displayLayer.controlTimebase = controlTimebase
+    guard let window = UIApplication.shared.connectedScenes
+      .compactMap({ $0 as? UIWindowScene })
+      .flatMap({ $0.windows })
+      .first(where: { $0.isKeyWindow })
+    else {
+      throw NSError(
+        domain: "ai_voice_translator.pip",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "无法找到当前 iOS 窗口，画中画暂不可用。"]
+      )
     }
 
+    let sourceView = UIView(frame: CGRect(x: 1, y: 1, width: 2, height: 2))
+    sourceView.backgroundColor = .clear
+    sourceView.alpha = 0.01
+    sourceView.isUserInteractionEnabled = false
+    window.addSubview(sourceView)
+    self.sourceView = sourceView
+
+    let contentViewController = AVPictureInPictureVideoCallViewController()
+    contentViewController.preferredContentSize = CGSize(width: 640, height: 360)
+    contentViewController.view.backgroundColor = .clear
+    self.contentViewController = contentViewController
+
+    let contentView = TranslationPipView()
+    contentView.translatesAutoresizingMaskIntoConstraints = false
+    contentViewController.view.addSubview(contentView)
+    NSLayoutConstraint.activate([
+      contentView.leadingAnchor.constraint(equalTo: contentViewController.view.leadingAnchor),
+      contentView.trailingAnchor.constraint(equalTo: contentViewController.view.trailingAnchor),
+      contentView.topAnchor.constraint(equalTo: contentViewController.view.topAnchor),
+      contentView.bottomAnchor.constraint(equalTo: contentViewController.view.bottomAnchor),
+    ])
+    self.contentView = contentView
+
     let source = AVPictureInPictureController.ContentSource(
-      sampleBufferDisplayLayer: displayLayer,
-      playbackDelegate: self
+      activeVideoCallSourceView: sourceView,
+      contentViewController: contentViewController
     )
     let pipController = AVPictureInPictureController(contentSource: source)
     pipController.delegate = self
     pipController.canStartPictureInPictureAutomaticallyFromInline = true
     pipController.requiresLinearPlayback = true
     self.pipController = pipController
-
-    displayLink = CADisplayLink(target: self, selector: #selector(displayTick))
-    displayLink?.preferredFrameRateRange = CAFrameRateRange(minimum: 1, maximum: 8, preferred: 4)
-    displayLink?.isPaused = true
-    displayLink?.add(to: .main, forMode: .common)
   }
 
-  @objc private func displayTick() {
-    guard isRunning, !isPaused else {
-      return
-    }
-    enqueueFrame(displayImmediately: false)
-  }
-
-  private func enqueueFrame(displayImmediately: Bool) {
-    guard let displayLayer else {
-      return
-    }
-    if displayLayer.status == .failed {
-      displayLayer.flush()
-    }
-    guard displayLayer.isReadyForMoreMediaData else {
-      return
-    }
-    guard let image = frameRenderer.render(),
-      let sampleBuffer = makeSampleBuffer(from: image, displayImmediately: displayImmediately)
-    else {
-      return
-    }
-    displayLayer.enqueue(sampleBuffer)
-    frameIndex += 1
-  }
-
-  private func makeSampleBuffer(from image: UIImage, displayImmediately: Bool) -> CMSampleBuffer? {
-    guard let pixelBuffer = makePixelBuffer(from: image) else {
-      return nil
-    }
-
-    var formatDescription: CMVideoFormatDescription?
-    let descriptionStatus = CMVideoFormatDescriptionCreateForImageBuffer(
-      allocator: kCFAllocatorDefault,
-      imageBuffer: pixelBuffer,
-      formatDescriptionOut: &formatDescription
+  private func apply(_ rawArguments: Any?) {
+    let args = rawArguments as? [String: Any] ?? [:]
+    let state = TranslationPipState(
+      sourceLanguage: stringValue(args, "sourceLanguage", fallback: "Source"),
+      targetLanguage: stringValue(args, "targetLanguage", fallback: "Target"),
+      status: stringValue(args, "status", fallback: "声译 AI"),
+      transcript: stringValue(args, "transcript", fallback: ""),
+      translation: stringValue(args, "translation", fallback: "")
     )
-    guard descriptionStatus == noErr, let formatDescription else {
-      return nil
-    }
-
-    var timing = CMSampleTimingInfo(
-      duration: CMTime(value: 1, timescale: 4),
-      presentationTimeStamp: CMTime(value: frameIndex, timescale: 4),
-      decodeTimeStamp: .invalid
-    )
-    var sampleBuffer: CMSampleBuffer?
-    let bufferStatus = CMSampleBufferCreateReadyWithImageBuffer(
-      allocator: kCFAllocatorDefault,
-      imageBuffer: pixelBuffer,
-      formatDescription: formatDescription,
-      sampleTiming: &timing,
-      sampleBufferOut: &sampleBuffer
-    )
-    guard bufferStatus == noErr, let sampleBuffer else {
-      return nil
-    }
-
-    if displayImmediately,
-      let attachments = CMSampleBufferGetSampleAttachmentsArray(
-        sampleBuffer,
-        createIfNecessary: true
-      )
-    {
-      let attachment = unsafeBitCast(
-        CFArrayGetValueAtIndex(attachments, 0),
-        to: CFMutableDictionary.self
-      )
-      CFDictionarySetValue(
-        attachment,
-        Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
-        Unmanaged.passUnretained(kCFBooleanTrue).toOpaque()
-      )
-    }
-    return sampleBuffer
-  }
-
-  private func makePixelBuffer(from image: UIImage) -> CVPixelBuffer? {
-    let width = Int(renderSize.width)
-    let height = Int(renderSize.height)
-    let attributes = [
-      kCVPixelBufferCGImageCompatibilityKey: true,
-      kCVPixelBufferCGBitmapContextCompatibilityKey: true,
-      kCVPixelBufferIOSurfacePropertiesKey: [:],
-    ] as CFDictionary
-
-    var pixelBuffer: CVPixelBuffer?
-    let status = CVPixelBufferCreate(
-      kCFAllocatorDefault,
-      width,
-      height,
-      kCVPixelFormatType_32BGRA,
-      attributes,
-      &pixelBuffer
-    )
-    guard status == kCVReturnSuccess, let pixelBuffer else {
-      return nil
-    }
-
-    CVPixelBufferLockBaseAddress(pixelBuffer, [])
-    defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
-
-    guard let context = CGContext(
-      data: CVPixelBufferGetBaseAddress(pixelBuffer),
-      width: width,
-      height: height,
-      bitsPerComponent: 8,
-      bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
-      space: CGColorSpaceCreateDeviceRGB(),
-      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
-        | CGBitmapInfo.byteOrder32Little.rawValue
-    ) else {
-      return nil
-    }
-
-    context.clear(CGRect(x: 0, y: 0, width: width, height: height))
-    UIGraphicsPushContext(context)
-    image.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
-    UIGraphicsPopContext()
-    return pixelBuffer
-  }
-
-  func pictureInPictureController(
-    _ pictureInPictureController: AVPictureInPictureController,
-    setPlaying playing: Bool
-  ) {
-    isPaused = !playing
-    displayLink?.isPaused = !playing
-    if let timebase {
-      CMTimebaseSetRate(timebase, rate: playing ? 1 : 0)
-    }
-  }
-
-  func pictureInPictureControllerTimeRangeForPlayback(
-    _ pictureInPictureController: AVPictureInPictureController
-  ) -> CMTimeRange {
-    CMTimeRange(start: .zero, duration: CMTime(seconds: 24 * 60 * 60, preferredTimescale: 600))
-  }
-
-  func pictureInPictureControllerIsPlaybackPaused(
-    _ pictureInPictureController: AVPictureInPictureController
-  ) -> Bool {
-    isPaused
-  }
-
-  func pictureInPictureController(
-    _ pictureInPictureController: AVPictureInPictureController,
-    didTransitionToRenderSize newRenderSize: CMVideoDimensions
-  ) {
-    enqueueFrame(displayImmediately: true)
-  }
-
-  func pictureInPictureController(
-    _ pictureInPictureController: AVPictureInPictureController,
-    skipByInterval skipInterval: CMTime,
-    completion completionHandler: @escaping () -> Void
-  ) {
-    completionHandler()
-  }
-
-  func pictureInPictureControllerShouldProhibitBackgroundAudioPlayback(
-    _ pictureInPictureController: AVPictureInPictureController
-  ) -> Bool {
-    true
-  }
-
-  func pictureInPictureControllerDidStopPictureInPicture(
-    _ pictureInPictureController: AVPictureInPictureController
-  ) {
-    isRunning = false
-    isPaused = true
-    displayLink?.isPaused = true
+    contentView?.state = state
   }
 
   private func stringValue(
@@ -320,151 +137,161 @@ private struct TranslationPipState {
   var translation: String = ""
 }
 
-private final class TranslationFrameRenderer {
-  let size: CGSize
-  var state = TranslationPipState()
-
-  init(size: CGSize) {
-    self.size = size
+private final class TranslationPipView: UIView {
+  var state = TranslationPipState() {
+    didSet { applyState(animated: true) }
   }
 
-  func render() -> UIImage? {
-    let format = UIGraphicsImageRendererFormat()
-    format.scale = 1
-    format.opaque = true
-    let renderer = UIGraphicsImageRenderer(size: size, format: format)
-    return renderer.image { context in
-      draw(in: CGRect(origin: .zero, size: size), context: context.cgContext)
-    }
+  private let backgroundGradient = CAGradientLayer()
+  private let cyanBlob = CALayer()
+  private let purpleBlob = CALayer()
+  private let glassView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+  private let statusLabel = UILabel()
+  private let languageLabel = UILabel()
+  private let primaryLabel = UILabel()
+  private let secondaryLabel = UILabel()
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    setup()
   }
 
-  private func draw(in rect: CGRect, context: CGContext) {
-    let colors = [
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    setup()
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    backgroundGradient.frame = bounds
+    cyanBlob.frame = CGRect(x: -70, y: -44, width: 220, height: 220)
+    cyanBlob.cornerRadius = 110
+    purpleBlob.frame = CGRect(x: bounds.width - 170, y: 20, width: 240, height: 240)
+    purpleBlob.cornerRadius = 120
+    glassView.layer.cornerRadius = 34
+  }
+
+  private func setup() {
+    clipsToBounds = true
+
+    backgroundGradient.colors = [
       UIColor(red: 0.03, green: 0.06, blue: 0.12, alpha: 1).cgColor,
       UIColor(red: 0.08, green: 0.10, blue: 0.22, alpha: 1).cgColor,
       UIColor(red: 0.02, green: 0.03, blue: 0.07, alpha: 1).cgColor,
-    ] as CFArray
-    if let gradient = CGGradient(
-      colorsSpace: CGColorSpaceCreateDeviceRGB(),
-      colors: colors,
-      locations: [0, 0.58, 1]
-    ) {
-      context.drawLinearGradient(
-        gradient,
-        start: CGPoint(x: rect.minX, y: rect.minY),
-        end: CGPoint(x: rect.maxX, y: rect.maxY),
-        options: []
-      )
-    }
+    ]
+    backgroundGradient.locations = [0, 0.58, 1]
+    backgroundGradient.startPoint = CGPoint(x: 0, y: 0)
+    backgroundGradient.endPoint = CGPoint(x: 1, y: 1)
+    layer.addSublayer(backgroundGradient)
 
-    drawBlob(
-      center: CGPoint(x: rect.width * 0.18, y: rect.height * 0.16),
-      radius: 160,
-      color: UIColor(red: 0.22, green: 0.83, blue: 1, alpha: 0.30),
-      context: context
-    )
-    drawBlob(
-      center: CGPoint(x: rect.width * 0.86, y: rect.height * 0.25),
-      radius: 190,
-      color: UIColor(red: 0.75, green: 0.52, blue: 1, alpha: 0.24),
-      context: context
-    )
+    cyanBlob.backgroundColor = UIColor(red: 0.22, green: 0.83, blue: 1, alpha: 0.32).cgColor
+    cyanBlob.shadowColor = UIColor(red: 0.22, green: 0.83, blue: 1, alpha: 0.65).cgColor
+    cyanBlob.shadowOpacity = 1
+    cyanBlob.shadowRadius = 50
+    layer.addSublayer(cyanBlob)
 
-    let glassRect = rect.insetBy(dx: 34, dy: 34)
-    let path = UIBezierPath(roundedRect: glassRect, cornerRadius: 34)
-    UIColor.white.withAlphaComponent(0.14).setFill()
-    path.fill()
-    UIColor.white.withAlphaComponent(0.35).setStroke()
-    path.lineWidth = 1.4
-    path.stroke()
+    purpleBlob.backgroundColor = UIColor(red: 0.75, green: 0.52, blue: 1, alpha: 0.26).cgColor
+    purpleBlob.shadowColor = UIColor(red: 0.75, green: 0.52, blue: 1, alpha: 0.55).cgColor
+    purpleBlob.shadowOpacity = 1
+    purpleBlob.shadowRadius = 56
+    layer.addSublayer(purpleBlob)
 
-    NSString(string: state.status).draw(
-      at: CGPoint(x: glassRect.minX + 24, y: glassRect.minY + 20),
-      withAttributes: [
-        .font: UIFont.systemFont(ofSize: 20, weight: .black),
-        .foregroundColor: UIColor.white.withAlphaComponent(0.78),
-      ]
-    )
+    glassView.translatesAutoresizingMaskIntoConstraints = false
+    glassView.clipsToBounds = true
+    glassView.layer.cornerRadius = 34
+    glassView.layer.borderWidth = 1.2
+    glassView.layer.borderColor = UIColor.white.withAlphaComponent(0.32).cgColor
+    addSubview(glassView)
+    NSLayoutConstraint.activate([
+      glassView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 34),
+      glassView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -34),
+      glassView.topAnchor.constraint(equalTo: topAnchor, constant: 34),
+      glassView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -34),
+    ])
 
-    NSString(string: "\(state.sourceLanguage) → \(state.targetLanguage)").draw(
-      at: CGPoint(x: glassRect.minX + 24, y: glassRect.minY + 50),
-      withAttributes: [
-        .font: UIFont.systemFont(ofSize: 15, weight: .bold),
-        .foregroundColor: UIColor.white.withAlphaComponent(0.55),
-      ]
-    )
+    let stack = UIStackView(arrangedSubviews: [
+      statusLabel,
+      languageLabel,
+      primaryLabel,
+      secondaryLabel,
+    ])
+    stack.axis = .vertical
+    stack.spacing = 8
+    stack.alignment = .fill
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    glassView.contentView.addSubview(stack)
+    NSLayoutConstraint.activate([
+      stack.leadingAnchor.constraint(equalTo: glassView.contentView.leadingAnchor, constant: 24),
+      stack.trailingAnchor.constraint(equalTo: glassView.contentView.trailingAnchor, constant: -24),
+      stack.topAnchor.constraint(equalTo: glassView.contentView.topAnchor, constant: 20),
+      stack.bottomAnchor.constraint(lessThanOrEqualTo: glassView.contentView.bottomAnchor, constant: -20),
+    ])
 
+    statusLabel.font = .systemFont(ofSize: 20, weight: .black)
+    statusLabel.textColor = UIColor.white.withAlphaComponent(0.78)
+
+    languageLabel.font = .systemFont(ofSize: 15, weight: .bold)
+    languageLabel.textColor = UIColor.white.withAlphaComponent(0.56)
+
+    primaryLabel.font = .systemFont(ofSize: 34, weight: .black)
+    primaryLabel.textColor = .white
+    primaryLabel.numberOfLines = 3
+    primaryLabel.adjustsFontSizeToFitWidth = true
+    primaryLabel.minimumScaleFactor = 0.72
+
+    secondaryLabel.font = .systemFont(ofSize: 18, weight: .semibold)
+    secondaryLabel.textColor = UIColor.white.withAlphaComponent(0.60)
+    secondaryLabel.numberOfLines = 2
+
+    applyState(animated: false)
+    startAmbientAnimation()
+  }
+
+  private func applyState(animated: Bool) {
     let translation = state.translation.trimmingCharacters(in: .whitespacesAndNewlines)
     let transcript = state.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-    let primary = translation.isEmpty ? (transcript.isEmpty ? "等待识别与翻译…" : transcript) : translation
+    let primary = translation.isEmpty
+      ? (transcript.isEmpty ? "等待识别与翻译…" : transcript)
+      : translation
     let secondary = translation.isEmpty ? "" : transcript
 
-    drawText(
-      primary,
-      rect: CGRect(
-        x: glassRect.minX + 24,
-        y: glassRect.minY + 102,
-        width: glassRect.width - 48,
-        height: 104
-      ),
-      font: UIFont.systemFont(ofSize: 34, weight: .black),
-      color: .white
-    )
+    let updates = {
+      self.statusLabel.text = self.state.status
+      self.languageLabel.text = "\(self.state.sourceLanguage) → \(self.state.targetLanguage)"
+      self.primaryLabel.text = primary
+      self.secondaryLabel.text = secondary
+      self.secondaryLabel.isHidden = secondary.isEmpty
+    }
 
-    if !secondary.isEmpty {
-      drawText(
-        secondary,
-        rect: CGRect(
-          x: glassRect.minX + 24,
-          y: glassRect.minY + 218,
-          width: glassRect.width - 48,
-          height: 58
-        ),
-        font: UIFont.systemFont(ofSize: 18, weight: .semibold),
-        color: UIColor.white.withAlphaComponent(0.58)
+    if animated {
+      UIView.transition(
+        with: self.primaryLabel,
+        duration: 0.22,
+        options: .transitionCrossDissolve,
+        animations: updates
       )
+    } else {
+      updates()
     }
   }
 
-  private func drawBlob(
-    center: CGPoint,
-    radius: CGFloat,
-    color: UIColor,
-    context: CGContext
-  ) {
-    context.saveGState()
-    context.setShadow(offset: .zero, blur: 46, color: color.cgColor)
-    context.setFillColor(color.cgColor)
-    context.fillEllipse(
-      in: CGRect(
-        x: center.x - radius / 2,
-        y: center.y - radius / 2,
-        width: radius,
-        height: radius
-      )
-    )
-    context.restoreGState()
-  }
+  private func startAmbientAnimation() {
+    let cyan = CABasicAnimation(keyPath: "transform.translation.x")
+    cyan.fromValue = -10
+    cyan.toValue = 18
+    cyan.duration = 4.6
+    cyan.autoreverses = true
+    cyan.repeatCount = .infinity
+    cyan.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    cyanBlob.add(cyan, forKey: "cyan-drift")
 
-  private func drawText(
-    _ text: String,
-    rect: CGRect,
-    font: UIFont,
-    color: UIColor
-  ) {
-    let paragraph = NSMutableParagraphStyle()
-    paragraph.lineBreakMode = .byTruncatingTail
-    paragraph.alignment = .left
-    paragraph.lineSpacing = 2
-    NSString(string: text).draw(
-      with: rect,
-      options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-      attributes: [
-        .font: font,
-        .foregroundColor: color,
-        .paragraphStyle: paragraph,
-      ],
-      context: nil
-    )
+    let purple = CABasicAnimation(keyPath: "transform.translation.y")
+    purple.fromValue = 14
+    purple.toValue = -18
+    purple.duration = 5.2
+    purple.autoreverses = true
+    purple.repeatCount = .infinity
+    purple.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    purpleBlob.add(purple, forKey: "purple-drift")
   }
 }

@@ -13,14 +13,14 @@ class PipBridge {
     }
   }
 
-  Future<void> start({
+  Future<bool> start({
     required String sourceLanguage,
     required String targetLanguage,
     required String status,
     String transcript = '',
     String translation = '',
   }) async {
-    await _safeInvoke('start', {
+    return _safeInvokeBool('start', {
       'sourceLanguage': sourceLanguage,
       'targetLanguage': targetLanguage,
       'status': status,
@@ -29,14 +29,14 @@ class PipBridge {
     });
   }
 
-  Future<void> update({
+  Future<bool> update({
     required String sourceLanguage,
     required String targetLanguage,
     required String status,
     String transcript = '',
     String translation = '',
   }) async {
-    await _safeInvoke('update', {
+    return _safeInvokeBool('update', {
       'sourceLanguage': sourceLanguage,
       'targetLanguage': targetLanguage,
       'status': status,
@@ -47,6 +47,16 @@ class PipBridge {
 
   Future<void> stop() async {
     await _safeInvoke('stop');
+  }
+
+  Future<bool> _safeInvokeBool(String method, Map<String, Object?> args) async {
+    try {
+      return await _channel.invokeMethod<bool>(method, args) ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
   }
 
   Future<void> _safeInvoke(String method, [Map<String, Object?>? args]) async {

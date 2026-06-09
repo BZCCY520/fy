@@ -674,13 +674,20 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
     });
 
     if (next) {
-      await _pipBridge.start(
+      final started = await _pipBridge.start(
         sourceLanguage: _sourceLanguage.nativeName,
         targetLanguage: _targetLanguage.nativeName,
         status: _continuousVideoTranslation ? '视频听译中' : '后台小窗已开启',
         transcript: _transcript,
         translation: _translation,
       );
+      if (!started && mounted) {
+        setState(() {
+          _pipEnabled = false;
+          _statusText = '后台小窗启动失败';
+          _errorText = '系统画中画未能启动；主界面字幕和灵动岛/Live Activity 仍可继续使用。';
+        });
+      }
     } else {
       await _pipBridge.stop();
     }
