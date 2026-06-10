@@ -45,20 +45,14 @@ class AiTranslator {
         },
       ],
     };
-    final headers = <String, String>{
-      'Content-Type': 'application/json',
-    };
+    final headers = <String, String>{'Content-Type': 'application/json'};
     final apiKey = settings.apiKey.trim();
     if (apiKey.isNotEmpty) {
       headers['Authorization'] = 'Bearer $apiKey';
     }
 
     final response = await _client
-        .post(
-          uri,
-          headers: headers,
-          body: jsonEncode(body),
-        )
+        .post(uri, headers: headers, body: jsonEncode(body))
         .timeout(const Duration(seconds: 45));
 
     final decodedText = utf8.decode(response.bodyBytes);

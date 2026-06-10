@@ -14,6 +14,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:video_player/video_player.dart';
 
 import 'ai_translator.dart';
+import 'emby_client.dart';
 import 'language_option.dart';
 import 'live_activity_bridge.dart';
 import 'pip_bridge.dart';
@@ -78,12 +79,14 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
   final _tts = FlutterTts();
   final _settingsStore = SettingsStore();
   final _translator = AiTranslator();
+  final _embyClient = EmbyClient();
   final _liveActivity = LiveActivityBridge();
   final _pipBridge = PipBridge();
 
   late final AnimationController _pulseController;
 
   TranslationSettings _settings = TranslationSettings.defaults;
+  EmbySettings _embySettings = EmbySettings.defaults;
   LanguageOption _sourceLanguage = appLanguages[0];
   LanguageOption _targetLanguage = appLanguages[1];
 
@@ -98,6 +101,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
   bool _autoTranslateAfterStop = false;
   bool _continuousVideoTranslation = false;
   bool _videoLoading = false;
+  bool _embyLoading = false;
   bool _captionVisible = true;
   bool _pipEnabled = false;
   bool _pipSupported = false;
@@ -119,6 +123,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
       duration: const Duration(milliseconds: 1800),
     )..repeat(reverse: true);
     unawaited(_loadSettings());
+    unawaited(_loadEmbySettings());
     unawaited(_loadPipSupport());
     unawaited(_configureTts());
     unawaited(_initializeSpeech());
@@ -155,6 +160,16 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
     setState(() {
       _settings = settings;
       _settingsLoaded = true;
+    });
+  }
+
+  Future<void> _loadEmbySettings() async {
+    final settings = await _settingsStore.loadEmby();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _embySettings = settings;
     });
   }
 
@@ -604,6 +619,122 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
     );
   }
 
+  Future<void> _openEmbyVideoSheet() async {
+    HapticFeedback.selectionClick();
+    var settings = _embySettings;
+    if (!settings.hasToken) {
+      final connected = await _connectEmby(settings);
+      if (connected == null) {
+        return;
+      }
+      settings = connected;
+    }
+
+    final item = await _pickEmbyVideo(settings);
+    if (item == null) {
+      return;
+    }
+    await _loadEmbyVideo(settings: _embySettings, item: item);
+  }
+
+  Future<EmbySettings?> _connectEmby(EmbySettings initialSettings) async {
+    final updated = await showModalBottomSheet<EmbySettings>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _EmbyConnectSheet(
+        initialSettings: initialSettings,
+        client: _embyClient,
+      ),
+    );
+    if (updated == null || !mounted) {
+      return null;
+    }
+    await _settingsStore.saveEmby(updated);
+    if (!mounted) {
+      return null;
+    }
+    setState(() {
+      _embySettings = updated;
+      _statusText = 'Emby 已连接：${updated.username}';
+      _errorText = null;
+    });
+    return updated;
+  }
+
+  Future<EmbyVideoItem?> _pickEmbyVideo(EmbySettings initialSettings) async {
+    var settings = initialSettings;
+    while (mounted) {
+      final result = await showModalBottomSheet<Object>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (_) =>
+            _EmbyVideoPickerSheet(settings: settings, client: _embyClient),
+      );
+      if (result is EmbyVideoItem) {
+        return result;
+      }
+      if (result is _ReconnectEmbyRequest) {
+        final updated = await _connectEmby(settings);
+        if (updated == null) {
+          return null;
+        }
+        settings = updated;
+        continue;
+      }
+      return null;
+    }
+    return null;
+  }
+
+  Future<void> _loadEmbyVideo({
+    required EmbySettings settings,
+    required EmbyVideoItem item,
+  }) async {
+    setState(() {
+      _embyLoading = true;
+      _statusText = '正在从 Emby 获取播放地址…';
+      _errorText = null;
+    });
+    try {
+      final source = await _embyClient.getPlaybackSource(
+        settings: settings,
+        itemId: item.id,
+      );
+      if (!mounted) {
+        return;
+      }
+      final uri = source.hlsStreamUri ?? source.directStreamUri;
+      await _loadVideoController(
+        VideoPlayerController.networkUrl(
+          uri,
+          httpHeaders: source.headers,
+          videoPlayerOptions: VideoPlayerOptions(
+            mixWithOthers: true,
+            allowBackgroundPlayback: true,
+          ),
+        ),
+        label: 'Emby · ${item.displayTitle}',
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _videoLoading = false;
+        _statusText = 'Emby 视频载入失败';
+        _errorText = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _embyLoading = false;
+        });
+      }
+    }
+  }
+
   Future<void> _loadVideoController(
     VideoPlayerController controller, {
     required String label,
@@ -916,6 +1047,8 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
                         _VideoTranslatePanel(
                           controller: _videoController,
                           videoLoading: _videoLoading,
+                          embyLoading: _embyLoading,
+                          embyConnected: _embySettings.hasToken,
                           sourceLabel: _videoSourceLabel,
                           captionVisible: _captionVisible,
                           captionOffset: _captionOffset,
@@ -925,6 +1058,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
                           translating: _isTranslating,
                           onPickLocal: _pickLocalVideo,
                           onOpenUrl: _openNetworkVideoSheet,
+                          onOpenEmby: _openEmbyVideoSheet,
                           onPlayPause: _toggleVideoPlayback,
                           onStart: _startVideoTranslation,
                           onStop: _stopVideoTranslation,
@@ -1461,6 +1595,8 @@ class _VideoTranslatePanel extends StatelessWidget {
   const _VideoTranslatePanel({
     required this.controller,
     required this.videoLoading,
+    required this.embyLoading,
+    required this.embyConnected,
     required this.sourceLabel,
     required this.captionVisible,
     required this.captionOffset,
@@ -1470,6 +1606,7 @@ class _VideoTranslatePanel extends StatelessWidget {
     required this.translating,
     required this.onPickLocal,
     required this.onOpenUrl,
+    required this.onOpenEmby,
     required this.onPlayPause,
     required this.onStart,
     required this.onStop,
@@ -1479,6 +1616,8 @@ class _VideoTranslatePanel extends StatelessWidget {
 
   final VideoPlayerController? controller;
   final bool videoLoading;
+  final bool embyLoading;
+  final bool embyConnected;
   final String? sourceLabel;
   final bool captionVisible;
   final Offset captionOffset;
@@ -1488,6 +1627,7 @@ class _VideoTranslatePanel extends StatelessWidget {
   final bool translating;
   final VoidCallback onPickLocal;
   final VoidCallback onOpenUrl;
+  final VoidCallback onOpenEmby;
   final VoidCallback onPlayPause;
   final VoidCallback onStart;
   final VoidCallback onStop;
@@ -1618,14 +1758,26 @@ class _VideoTranslatePanel extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: _LiquidActionButton(
-                  label: '视频 URL',
-                  icon: CupertinoIcons.link,
-                  enabled: !active,
-                  onTap: onOpenUrl,
+                  label: embyLoading
+                      ? 'Emby…'
+                      : (embyConnected ? 'Emby 视频' : '连接 Emby'),
+                  icon: embyConnected
+                      ? CupertinoIcons.checkmark_seal_fill
+                      : CupertinoIcons.tv,
+                  enabled: !active && !embyLoading,
+                  onTap: onOpenEmby,
                   subtle: true,
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          _LiquidActionButton(
+            label: '视频 URL',
+            icon: CupertinoIcons.link,
+            enabled: !active,
+            onTap: onOpenUrl,
+            subtle: true,
           ),
           const SizedBox(height: 10),
           _LiquidActionButton(
@@ -2417,6 +2569,365 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               Navigator.of(context).pop(updated);
             },
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReconnectEmbyRequest {
+  const _ReconnectEmbyRequest();
+}
+
+class _EmbyConnectSheet extends StatefulWidget {
+  const _EmbyConnectSheet({
+    required this.initialSettings,
+    required this.client,
+  });
+
+  final EmbySettings initialSettings;
+  final EmbyClient client;
+
+  @override
+  State<_EmbyConnectSheet> createState() => _EmbyConnectSheetState();
+}
+
+class _EmbyConnectSheetState extends State<_EmbyConnectSheet> {
+  late final TextEditingController _serverController;
+  late final TextEditingController _usernameController;
+  late final TextEditingController _passwordController;
+  bool _connecting = false;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _serverController = TextEditingController(
+      text: widget.initialSettings.serverUrl,
+    );
+    _usernameController = TextEditingController(
+      text: widget.initialSettings.username,
+    );
+    _passwordController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _serverController.dispose();
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _connect() async {
+    final server = _serverController.text.trim();
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text;
+
+    if (server.isEmpty || username.isEmpty || password.isEmpty) {
+      setState(() {
+        _errorText = '请填写完整的服务器地址、用户名和密码。';
+      });
+      return;
+    }
+
+    setState(() {
+      _connecting = true;
+      _errorText = null;
+    });
+
+    try {
+      final session = await widget.client.authenticate(
+        serverUrl: server,
+        username: username,
+        password: password,
+      );
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(
+        EmbySettings(
+          serverUrl: server,
+          username: session.username,
+          userId: session.userId,
+          accessToken: session.accessToken,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _connecting = false;
+        _errorText = error.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _BottomGlassSheet(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  '连接 Emby',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              _GlassIconButton(
+                icon: CupertinoIcons.xmark,
+                tooltip: '关闭',
+                onTap: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '填写 Emby 服务器地址与登录凭据，连接后可浏览媒体库视频并用现有字幕听译流程识别翻译。',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.56),
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 18),
+          _GlassTextField(
+            label: '服务器地址',
+            controller: _serverController,
+            keyboardType: TextInputType.url,
+            placeholder: 'http://192.168.1.100:8096',
+          ),
+          const SizedBox(height: 12),
+          _GlassTextField(
+            label: '用户名',
+            controller: _usernameController,
+            placeholder: 'emby',
+          ),
+          const SizedBox(height: 12),
+          _GlassTextField(
+            label: '密码',
+            controller: _passwordController,
+            placeholder: '登录密码',
+            obscureText: true,
+          ),
+          if (_errorText != null) ...[
+            const SizedBox(height: 14),
+            Text(
+              _errorText!,
+              style: const TextStyle(
+                color: Color(0xFFFF5A7A),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          const SizedBox(height: 18),
+          _LiquidActionButton(
+            label: _connecting ? '正在连接…' : '登录并连接',
+            icon: CupertinoIcons.checkmark_seal_fill,
+            enabled: !_connecting,
+            onTap: _connect,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmbyVideoPickerSheet extends StatefulWidget {
+  const _EmbyVideoPickerSheet({required this.settings, required this.client});
+
+  final EmbySettings settings;
+  final EmbyClient client;
+
+  @override
+  State<_EmbyVideoPickerSheet> createState() => _EmbyVideoPickerSheetState();
+}
+
+class _EmbyVideoPickerSheetState extends State<_EmbyVideoPickerSheet> {
+  final _searchController = TextEditingController();
+  List<EmbyVideoItem> _videos = const [];
+  bool _loading = false;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadVideos());
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadVideos({String? searchTerm}) async {
+    setState(() {
+      _loading = true;
+      _errorText = null;
+    });
+
+    try {
+      final videos = await widget.client.fetchVideos(
+        settings: widget.settings,
+        searchTerm: searchTerm,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _videos = videos;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _errorText = error.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxListHeight = MediaQuery.sizeOf(context).height * 0.48;
+    return _BottomGlassSheet(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Emby 媒体库',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      widget.settings.username,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.56),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _GlassIconButton(
+                icon: CupertinoIcons.arrow_2_circlepath,
+                tooltip: '重新连接',
+                onTap: () =>
+                    Navigator.of(context).pop(const _ReconnectEmbyRequest()),
+              ),
+              const SizedBox(width: 8),
+              _GlassIconButton(
+                icon: CupertinoIcons.xmark,
+                tooltip: '关闭',
+                onTap: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _GlassTextField(
+            label: '搜索',
+            controller: _searchController,
+            placeholder: '输入片名后按键盘完成',
+            suffix: IconButton(
+              onPressed: () => _loadVideos(searchTerm: _searchController.text),
+              icon: Icon(
+                CupertinoIcons.search,
+                color: Colors.white.withValues(alpha: 0.7),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (_loading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: CupertinoActivityIndicator(color: Colors.white),
+              ),
+            )
+          else if (_errorText != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                _errorText!,
+                style: const TextStyle(
+                  color: Color(0xFFFF5A7A),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            )
+          else if (_videos.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  '没有找到视频',
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.52)),
+                ),
+              ),
+            )
+          else
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxListHeight),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: _videos.length,
+                separatorBuilder: (context, index) => Divider(
+                  height: 1,
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
+                itemBuilder: (context, index) {
+                  final video = _videos[index];
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      video.displayTitle,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    subtitle: video.subtitle.isEmpty
+                        ? null
+                        : Text(
+                            video.subtitle,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.48),
+                              fontSize: 12,
+                            ),
+                          ),
+                    trailing: const Icon(
+                      CupertinoIcons.play_circle_fill,
+                      color: Color(0xFF7DD3FC),
+                    ),
+                    onTap: () => Navigator.of(context).pop(video),
+                  );
+                },
+              ),
+            ),
         ],
       ),
     );
