@@ -3,12 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:file_picker/file_picker.dart';
 import '../theme/liquid_glass_theme.dart';
-import '../widgets/liquid_glass/liquid_glass_card.dart';
 import '../widgets/liquid_glass/liquid_glass_button.dart';
-import '../emby_client.dart';
 import '../settings_store.dart';
 import 'video_player_screen.dart';
 import 'settings_screen.dart';
+import 'emby_browser_screen.dart';
 
 class VideoLibraryScreen extends StatefulWidget {
   const VideoLibraryScreen({super.key});
@@ -20,13 +19,9 @@ class VideoLibraryScreen extends StatefulWidget {
 class _VideoLibraryScreenState extends State<VideoLibraryScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final _embyClient = EmbyClient();
   final _settingsStore = SettingsStore();
 
   EmbySettings _embySettings = EmbySettings.defaults;
-  List<EmbyVideoItem> _embyVideos = [];
-  bool _embyLoading = false;
-  String? _errorText;
 
   @override
   void initState() {
@@ -47,36 +42,6 @@ class _VideoLibraryScreenState extends State<VideoLibraryScreen>
     setState(() {
       _embySettings = settings;
     });
-    if (settings.hasToken) {
-      _loadEmbyVideos();
-    }
-  }
-
-  Future<void> _loadEmbyVideos() async {
-    if (!_embySettings.hasToken) return;
-
-    setState(() {
-      _embyLoading = true;
-      _errorText = null;
-    });
-
-    try {
-      final videos = await _embyClient.fetchVideos(
-        settings: _embySettings,
-        limit: 50,
-      );
-      if (!mounted) return;
-      setState(() {
-        _embyVideos = videos;
-        _embyLoading = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _embyLoading = false;
-        _errorText = error.toString();
-      });
-    }
   }
 
   Future<void> _pickLocalVideo() async {
@@ -259,6 +224,15 @@ class _VideoLibraryScreenState extends State<VideoLibraryScreen>
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: LiquidGlassTheme.spaceS),
+            Text(
+              '连接 Emby 服务器以浏览媒体库',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: LiquidGlassTheme.textTertiary,
+                fontSize: 14,
+              ),
+            ),
             const SizedBox(height: LiquidGlassTheme.spaceL),
             LiquidGlassButton(
               text: '去设置',
@@ -278,115 +252,76 @@ class _VideoLibraryScreenState extends State<VideoLibraryScreen>
       );
     }
 
-    if (_embyLoading) {
-      return const Center(
-        child: CircularProgressIndicator(
-          color: LiquidGlassTheme.accentBlue,
-        ),
-      );
-    }
-
-    if (_errorText != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(LiquidGlassTheme.spaceL),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                CupertinoIcons.exclamationmark_triangle,
-                size: 64,
-                color: LiquidGlassTheme.error,
-              ),
-              const SizedBox(height: LiquidGlassTheme.spaceM),
-              Text(
-                _errorText!,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: LiquidGlassTheme.textSecondary,
-                ),
-              ),
-              const SizedBox(height: LiquidGlassTheme.spaceL),
-              LiquidGlassButton(
-                text: '重试',
-                icon: CupertinoIcons.refresh,
-                onPressed: _loadEmbyVideos,
-              ),
-            ],
+    // 已连接 Emby，显示浏览按钮
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 120,
+            height: 120,
+            decoration: BoxDecoration(
+              color: LiquidGlassTheme.glassBackground,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              CupertinoIcons.tv_fill,
+              size: 64,
+              color: LiquidGlassTheme.accentBlue,
+            ),
           ),
-        ),
-      );
-    }
-
-    if (_embyVideos.isEmpty) {
-      return Center(
-        child: Text(
-          '没有找到视频',
-          style: TextStyle(
-            color: LiquidGlassTheme.textSecondary,
-            fontSize: 16,
+          const SizedBox(height: LiquidGlassTheme.spaceL),
+          Text(
+            'Emby 媒体服务器',
+            style: const TextStyle(
+              color: LiquidGlassTheme.textPrimary,
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.8,
+            ),
           ),
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(LiquidGlassTheme.spaceM),
-      itemCount: _embyVideos.length,
-      itemBuilder: (context, index) {
-        final video = _embyVideos[index];
-        return LiquidGlassCard(
-          margin: const EdgeInsets.only(bottom: LiquidGlassTheme.spaceM),
-          onTap: () {
-            // TODO: Load Emby video
-          },
-          child: Row(
-            children: [
-              Container(
-                width: 100,
-                height: 60,
-                decoration: BoxDecoration(
-                  color: LiquidGlassTheme.glassSheen,
-                  borderRadius:
-                      BorderRadius.circular(LiquidGlassTheme.radiusSmall),
-                ),
-                child: const Icon(
-                  CupertinoIcons.play_rectangle_fill,
-                  color: LiquidGlassTheme.textSecondary,
-                ),
-              ),
-              const SizedBox(width: LiquidGlassTheme.spaceM),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      video.displayTitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: LiquidGlassTheme.textPrimary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (video.subtitle.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        video.subtitle,
-                        style: TextStyle(
-                          color: LiquidGlassTheme.textTertiary,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
+          const SizedBox(height: LiquidGlassTheme.spaceS),
+          Text(
+            '已连接：${_embySettings.username}',
+            style: TextStyle(
+              color: LiquidGlassTheme.textSecondary,
+              fontSize: 16,
+            ),
           ),
-        );
-      },
+          const SizedBox(height: LiquidGlassTheme.spaceXl),
+          LiquidGlassButton(
+            text: '浏览媒体库',
+            icon: CupertinoIcons.square_grid_2x2,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => EmbyBrowserScreen(
+                    settings: _embySettings,
+                  ),
+                ),
+              );
+            },
+            width: 200,
+          ),
+          const SizedBox(height: LiquidGlassTheme.spaceM),
+          LiquidGlassButton(
+            text: '重新连接',
+            icon: CupertinoIcons.arrow_2_circlepath,
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const SettingsScreen(),
+                ),
+              );
+              _loadEmbySettings();
+            },
+            backgroundColor: Colors.transparent,
+            width: 200,
+          ),
+        ],
+      ),
     );
   }
 
