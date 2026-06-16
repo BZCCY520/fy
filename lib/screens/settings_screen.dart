@@ -70,14 +70,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           TextButton(
             onPressed: () async {
+              final navigator = Navigator.of(context);
               final updated = TranslationSettings(
                 endpoint: endpointController.text,
                 apiKey: apiKeyController.text,
                 model: modelController.text,
               );
               await _settingsStore.save(updated);
+              if (!mounted) return;
               setState(() => _translationSettings = updated);
-              if (mounted) Navigator.pop(context);
+              navigator.pop();
             },
             child: const Text('保存'),
           ),
@@ -117,6 +119,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           TextButton(
             onPressed: () async {
+              final navigator = Navigator.of(context);
+              final messenger = ScaffoldMessenger.of(context);
               try {
                 final session = await _embyClient.authenticate(
                   serverUrl: serverController.text,
@@ -130,19 +134,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   accessToken: session.accessToken,
                 );
                 await _settingsStore.saveEmby(updated);
+                if (!mounted) return;
                 setState(() => _embySettings = updated);
-                if (mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Emby 连接成功')),
-                  );
-                }
+                navigator.pop();
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Emby 连接成功')),
+                );
               } catch (error) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('连接失败：$error')),
-                  );
-                }
+                if (!mounted) return;
+                messenger.showSnackBar(
+                  SnackBar(content: Text('连接失败：$error')),
+                );
               }
             },
             child: const Text('连接'),
