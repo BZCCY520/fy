@@ -150,6 +150,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+    );
   }
 
   Widget _buildTextField(
@@ -296,7 +297,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               color: (_embySettings.hasToken
                                       ? LiquidGlassTheme.success
                                       : LiquidGlassTheme.warning)
-                                  .withOpacity(0.2),
+                                  .withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(
                                 LiquidGlassTheme.radiusPill,
                               ),
