@@ -1,4 +1,4 @@
-import 'package:ai_voice_translator/settings_store.dart';
+import 'package:ai_subtitle_translator/settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

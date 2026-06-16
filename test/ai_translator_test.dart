@@ -1,8 +1,8 @@
 import 'dart:convert';
 
-import 'package:ai_voice_translator/ai_translator.dart';
-import 'package:ai_voice_translator/language_option.dart';
-import 'package:ai_voice_translator/settings_store.dart';
+import 'package:ai_subtitle_translator/ai_translator.dart';
+import 'package:ai_subtitle_translator/language_option.dart';
+import 'package:ai_subtitle_translator/settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';

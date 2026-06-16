@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>声译 AI</string>
+	<string>AI 字幕</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>ai_voice_translator</string>
+	<string>ai_subtitle_translator</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -39,14 +39,10 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>需要访问局域网中的 Emby 服务器来读取和播放你的媒体库视频。</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>需要使用麦克风来提取你的语音并生成待翻译文本。</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>需要使用系统语音识别能力将声音转写为文本。</string>
 	<key>NSSupportsLiveActivities</key>
-	<true/>
+	<false/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
-	<true/>
+	<false/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
