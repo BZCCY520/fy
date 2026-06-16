@@ -96,7 +96,7 @@ class _FloatingSubtitleState extends State<FloatingSubtitle> {
                   vertical: 16,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.7),
+                  color: Colors.black.withValues(alpha: 0.7),
                   borderRadius:
                       BorderRadius.circular(LiquidGlassTheme.radiusMedium),
                   border: Border.all(
@@ -105,7 +105,7 @@ class _FloatingSubtitleState extends State<FloatingSubtitle> {
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.4),
+                      color: Colors.black.withValues(alpha: 0.4),
                       blurRadius: 30,
                       offset: const Offset(0, 15),
                     ),

@@ -295,7 +295,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       vertical: 12,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
+                      color: Colors.black.withValues(alpha: 0.7),
                       borderRadius: BorderRadius.circular(
                         LiquidGlassTheme.radiusMedium,
                       ),
@@ -348,7 +348,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Colors.black.withOpacity(0.7),
+              Colors.black.withValues(alpha: 0.7),
               Colors.transparent,
             ],
           ),

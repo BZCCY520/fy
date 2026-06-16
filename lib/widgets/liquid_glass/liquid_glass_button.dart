@@ -71,20 +71,20 @@ class _LiquidGlassButtonState extends State<LiquidGlassButton> {
                 color: widget.backgroundColor ??
                     (isEnabled
                         ? LiquidGlassTheme.glassBackground
-                        : LiquidGlassTheme.glassBackground.withOpacity(0.3)),
+                        : LiquidGlassTheme.glassBackground.withValues(alpha: 0.3)),
                 borderRadius:
                     BorderRadius.circular(LiquidGlassTheme.radiusMedium),
                 border: Border.all(
                   color: widget.borderColor ??
                       (isEnabled
                           ? LiquidGlassTheme.glassBorder
-                          : LiquidGlassTheme.glassBorder.withOpacity(0.3)),
+                          : LiquidGlassTheme.glassBorder.withValues(alpha: 0.3)),
                   width: 1.0,
                 ),
                 boxShadow: isEnabled
                     ? [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
+                          color: Colors.black.withValues(alpha: 0.2),
                           blurRadius: 20,
                           offset: const Offset(0, 10),
                         ),
