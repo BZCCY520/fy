@@ -1,21 +1,26 @@
 import 'package:flutter/material.dart';
 
-/// Liquid Glass 设计主题配置
-/// 基于 Apple iOS 26 Liquid Glass 设计语言
+/// Liquid Glass 明亮主题配置
+/// 基于 Apple iOS 26 Liquid Glass 设计语言 - 亮色模式
 class LiquidGlassTheme {
-  // 颜色系统
-  static const Color background = Color(0xFF000000); // 纯黑背景
-  static const Color glassBackground = Color(0x33FFFFFF); // 半透明白色玻璃
-  static const Color glassBorder = Color(0x1AFFFFFF); // 玻璃边框
-  static const Color glassSheen = Color(0x0DFFFFFF); // 玻璃光泽
-  static const Color accentBlue = Color(0xFF00A8FF); // 强调色
-  static const Color accentPurple = Color(0xFF9D4EDD); // 紫色强调
-  static const Color textPrimary = Color(0xFFFFFFFF); // 主文本
-  static const Color textSecondary = Color(0x99FFFFFF); // 次要文本
-  static const Color textTertiary = Color(0x66FFFFFF); // 第三级文本
-  static const Color success = Color(0xFF10B981); // 成功色
-  static const Color warning = Color(0xFFFB923C); // 警告色
-  static const Color error = Color(0xFFEF4444); // 错误色
+  // 颜色系统 - 明亮模式
+  static const Color background = Color(0xFFFFFFFF); // 纯白背景
+  static const Color surfaceBackground = Color(0xFFF5F5F7); // 浅灰表面
+  static const Color glassBackground = Color(0xE6FFFFFF); // 半透明白色玻璃
+  static const Color glassBorder = Color(0x1A000000); // 深色玻璃边框
+  static const Color glassSheen = Color(0x0D000000); // 玻璃光泽
+  static const Color accentBlue = Color(0xFF007AFF); // iOS 蓝色
+  static const Color accentPurple = Color(0xFFAF52DE); // 紫色强调
+  static const Color textPrimary = Color(0xFF000000); // 主文本
+  static const Color textSecondary = Color(0x99000000); // 次要文本
+  static const Color textTertiary = Color(0x66000000); // 第三级文本
+  static const Color success = Color(0xFF34C759); // 成功色
+  static const Color warning = Color(0xFFFF9500); // 警告色
+  static const Color error = Color(0xFFFF3B30); // 错误色
+
+  // 卡片和容器颜色
+  static const Color cardBackground = Color(0xFFFFFFFF);
+  static const Color cardShadow = Color(0x0A000000);
 
   // 圆角
   static const double radiusSmall = 16.0;
@@ -42,17 +47,17 @@ class LiquidGlassTheme {
   static const Duration animationSlow = Duration(milliseconds: 500);
   static const Curve animationCurve = Curves.easeInOutCubic;
 
-  // 构建主题数据
-  static ThemeData get darkTheme {
+  // 构建明亮主题数据
+  static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
+      brightness: Brightness.light,
       fontFamily: 'SF Pro Display',
       scaffoldBackgroundColor: background,
-      colorScheme: const ColorScheme.dark(
+      colorScheme: const ColorScheme.light(
         primary: accentBlue,
         secondary: accentPurple,
-        surface: Color(0xFF1A1A1A),
+        surface: surfaceBackground,
         onSurface: textPrimary,
         error: error,
       ),
@@ -62,6 +67,7 @@ class LiquidGlassTheme {
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
+        foregroundColor: textPrimary,
         titleTextStyle: TextStyle(
           color: textPrimary,
           fontSize: 17,

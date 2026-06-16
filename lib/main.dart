@@ -6,14 +6,14 @@ import 'screens/video_library_screen.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 设置系统 UI 样式
+  // 设置系统 UI 样式 - 亮色模式
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarBrightness: Brightness.dark,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Colors.black,
-      systemNavigationBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.light,
+      statusBarIconBrightness: Brightness.dark,
+      systemNavigationBarColor: Colors.white,
+      systemNavigationBarIconBrightness: Brightness.dark,
     ),
   );
 
@@ -34,7 +34,7 @@ class AISubtitleApp extends StatelessWidget {
     return MaterialApp(
       title: 'AI 字幕',
       debugShowCheckedModeBanner: false,
-      theme: LiquidGlassTheme.darkTheme,
+      theme: LiquidGlassTheme.lightTheme,
       home: const VideoLibraryScreen(),
     );
   }
