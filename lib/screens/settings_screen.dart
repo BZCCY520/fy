@@ -150,7 +150,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
-    );
   }
 
   Widget _buildTextField(
