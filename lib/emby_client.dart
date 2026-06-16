@@ -229,6 +229,8 @@ class EmbyClient {
     final directStreamUrl = mediaSource?['DirectStreamUrl']?.toString();
     final container = _safeContainer(mediaSource?['Container']?.toString());
     final audioStreamIndex = _defaultAudioStreamIndex(mediaSource);
+
+    // 构建直接流 URL，优先使用服务器返回的 DirectStreamUrl
     final directQuery = <String, String>{'Static': 'true', 'api_key': token};
     if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
       directQuery['MediaSourceId'] = mediaSourceId;
@@ -251,6 +253,7 @@ class EmbyClient {
             'stream.${container ?? 'mp4'}',
           ], directQuery);
 
+    // HLS 流作为备选方案（某些设备上兼容性较差）
     final hlsQuery = <String, String>{
       'api_key': token,
       'VideoCodec': 'h264',
@@ -275,7 +278,11 @@ class EmbyClient {
         itemId,
         'master.m3u8',
       ], hlsQuery),
-      headers: {'X-Emby-Token': token, 'X-MediaBrowser-Token': token},
+      headers: {
+        'X-Emby-Token': token,
+        'X-MediaBrowser-Token': token,
+        'Accept': '*/*',
+      },
     );
   }
 

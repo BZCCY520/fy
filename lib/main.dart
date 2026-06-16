@@ -8,6 +8,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -607,6 +608,37 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
       });
       return;
     }
+
+    // 验证 URL 可访问性
+    setState(() {
+      _videoLoading = true;
+      _statusText = '正在验证 URL…';
+      _videoSourceLabel = uri.host;
+      _errorText = null;
+    });
+
+    try {
+      // 发送 HEAD 请求检查 URL 可用性（超时 15 秒）
+      final http.Client timeoutClient = http.Client();
+      try {
+        final http.Response headResponse = await timeoutClient
+            .head(uri)
+            .timeout(const Duration(seconds: 15));
+        if (headResponse.statusCode < 200 || headResponse.statusCode >= 400) {
+          throw Exception('视频源返回 ${headResponse.statusCode} 错误');
+        }
+      } finally {
+        timeoutClient.close();
+      }
+    } catch (validationError) {
+      setState(() {
+        _videoLoading = false;
+        _statusText = '视频验证失败';
+        _errorText = '无法访问视频源：$validationError\n请确保视频 URL 可公开访问。';
+      });
+      return;
+    }
+
     await _loadVideoController(
       VideoPlayerController.networkUrl(
         uri,
@@ -615,7 +647,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
           allowBackgroundPlayback: true,
         ),
       ),
-      label: uri.host,
+      label: uri.toString(),
     );
   }
 
@@ -705,18 +737,54 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
       if (!mounted) {
         return;
       }
-      final uri = source.hlsStreamUri ?? source.directStreamUri;
-      await _loadVideoController(
-        VideoPlayerController.networkUrl(
-          uri,
-          httpHeaders: source.headers,
-          videoPlayerOptions: VideoPlayerOptions(
-            mixWithOthers: true,
-            allowBackgroundPlayback: true,
+      // 优先使用直接流，如果失败则尝试 HLS
+      final uri = source.directStreamUri;
+      String? loadError;
+
+      try {
+        await _loadVideoController(
+          VideoPlayerController.networkUrl(
+            uri,
+            httpHeaders: source.headers,
+            videoPlayerOptions: VideoPlayerOptions(
+              mixWithOthers: true,
+              allowBackgroundPlayback: true,
+            ),
           ),
-        ),
-        label: 'Emby · ${item.displayTitle}',
-      );
+          label: 'Emby · ${item.displayTitle}',
+        );
+        return; // 成功加载，直接返回
+      } catch (directError) {
+        loadError = directError.toString();
+        // 直接流失败，尝试 HLS
+        if (source.hlsStreamUri != null) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _statusText = '正在尝试 HLS 流播放…';
+          });
+          try {
+            await _loadVideoController(
+              VideoPlayerController.networkUrl(
+                source.hlsStreamUri!,
+                httpHeaders: source.headers,
+                videoPlayerOptions: VideoPlayerOptions(
+                  mixWithOthers: true,
+                  allowBackgroundPlayback: true,
+                ),
+              ),
+              label: 'Emby · ${item.displayTitle}',
+            );
+            return; // HLS 成功
+          } catch (hlsError) {
+            loadError += '\n\nHLS stream: $hlsError';
+          }
+        }
+      }
+
+      // 两种方式都失败
+      throw Exception(loadError);
     } catch (error) {
       if (!mounted) {
         return;
@@ -757,6 +825,12 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
 
     try {
       await controller.initialize();
+      if (!controller.value.isInitialized) {
+        throw Exception('视频控制器初始化失败：未能初始化视频源');
+      }
+      if (controller.value.hasError) {
+        throw Exception('视频控制器错误：${controller.value.errorDescription ?? "未知错误"}');
+      }
       await controller.setLooping(false);
       await controller.setVolume(1);
       controller.addListener(_onVideoChanged);
@@ -768,7 +842,7 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
         _videoController = controller;
         _videoLoading = false;
         _captionOffset = const Offset(18, 220);
-        _statusText = '视频已就绪，点击“开始视频听译”';
+        _statusText = '视频已就绪，点击”开始视频听译”';
       });
     } catch (error) {
       await controller.dispose();
@@ -779,8 +853,9 @@ class _VoiceTranslatorHomePageState extends State<VoiceTranslatorHomePage>
         _videoController = null;
         _videoLoading = false;
         _statusText = '视频载入失败';
-        _errorText = error.toString();
+        _errorText = '无法载入视频：${error.toString()}';
       });
+      rethrow; // 重新抛出以便上层捕获
     }
   }
 
