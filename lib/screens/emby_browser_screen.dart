@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../theme/liquid_glass_theme.dart';
 import '../widgets/liquid_glass/liquid_glass_button.dart';
 import '../widgets/liquid_glass/liquid_glass_card.dart';
@@ -413,47 +414,82 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
   }
 
   Widget _buildVideoCard(EmbyVideoItem video) {
+    final posterUrl = _embyClient.getPosterUrl(
+      serverUrl: widget.settings.serverUrl,
+      itemId: video.id,
+      width: 300,
+    );
+
     return LiquidGlassCard(
       padding: EdgeInsets.zero,
       onTap: () => _playVideo(video),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 封面占位符
+          // 海报图片
           AspectRatio(
             aspectRatio: 2 / 3,
-            child: Container(
-              decoration: BoxDecoration(
-                color: LiquidGlassTheme.glassBackground,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(LiquidGlassTheme.radiusLarge),
-                ),
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(LiquidGlassTheme.radiusLarge),
               ),
               child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  Center(
-                    child: Icon(
-                      video.type == 'Movie'
-                          ? CupertinoIcons.film
-                          : CupertinoIcons.tv,
-                      size: 48,
-                      color: LiquidGlassTheme.textTertiary,
+                  CachedNetworkImage(
+                    imageUrl: posterUrl,
+                    fit: BoxFit.cover,
+                    httpHeaders: {
+                      'X-Emby-Token': widget.settings.accessToken,
+                    },
+                    placeholder: (context, url) => Container(
+                      color: LiquidGlassTheme.glassBackground,
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: LiquidGlassTheme.accentBlue,
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    ),
+                    errorWidget: (context, url, error) => Container(
+                      color: LiquidGlassTheme.glassBackground,
+                      child: Center(
+                        child: Icon(
+                          video.type == 'Movie'
+                              ? CupertinoIcons.film
+                              : CupertinoIcons.tv,
+                          size: 48,
+                          color: LiquidGlassTheme.textTertiary,
+                        ),
+                      ),
                     ),
                   ),
-                  // 播放按钮
+                  // 播放按钮叠加层
                   Positioned.fill(
-                    child: Center(
-                      child: Container(
-                        width: 56,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.6),
-                          shape: BoxShape.circle,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.3),
+                          ],
                         ),
-                        child: const Icon(
-                          CupertinoIcons.play_fill,
-                          color: Colors.white,
-                          size: 28,
+                      ),
+                      child: Center(
+                        child: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            CupertinoIcons.play_fill,
+                            color: Colors.white,
+                            size: 28,
+                          ),
                         ),
                       ),
                     ),
@@ -490,6 +526,27 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
                         color: LiquidGlassTheme.textTertiary,
                         fontSize: 12,
                       ),
+                    ),
+                  ],
+                  if (video.communityRating != null) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          CupertinoIcons.star_fill,
+                          size: 12,
+                          color: LiquidGlassTheme.warning,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          video.communityRating!.toStringAsFixed(1),
+                          style: TextStyle(
+                            color: LiquidGlassTheme.textSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ],

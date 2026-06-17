@@ -26,6 +26,9 @@ class EmbyVideoItem {
     this.episodeNumber,
     this.productionYear,
     this.runtime,
+    this.overview,
+    this.communityRating,
+    this.imageBlurHash,
   });
 
   final String id;
@@ -36,6 +39,9 @@ class EmbyVideoItem {
   final int? episodeNumber;
   final int? productionYear;
   final Duration? runtime;
+  final String? overview;
+  final double? communityRating;
+  final String? imageBlurHash;
 
   String get displayTitle {
     if (seriesName != null && seriesName!.trim().isNotEmpty) {
@@ -99,6 +105,63 @@ class EmbyClient {
   static const _version = '1.0.0';
 
   final http.Client _client;
+
+  /// 获取媒体项的图片 URL
+  ///
+  /// [serverUrl] Emby 服务器地址
+  /// [itemId] 媒体项 ID
+  /// [imageType] 图片类型: Primary, Backdrop, Logo, etc.
+  /// [maxWidth] 最大宽度
+  /// [maxHeight] 最大高度
+  /// [quality] 图片质量 (1-100)
+  String getImageUrl({
+    required String serverUrl,
+    required String itemId,
+    String imageType = 'Primary',
+    int? maxWidth,
+    int? maxHeight,
+    int quality = 90,
+  }) {
+    final query = <String, String>{
+      'quality': quality.toString(),
+    };
+    if (maxWidth != null) query['maxWidth'] = maxWidth.toString();
+    if (maxHeight != null) query['maxHeight'] = maxHeight.toString();
+
+    return _apiUri(
+      serverUrl,
+      ['Items', itemId, 'Images', imageType],
+      query,
+    ).toString();
+  }
+
+  /// 获取海报 URL（Primary 图片）
+  String getPosterUrl({
+    required String serverUrl,
+    required String itemId,
+    int? width,
+  }) {
+    return getImageUrl(
+      serverUrl: serverUrl,
+      itemId: itemId,
+      imageType: 'Primary',
+      maxWidth: width ?? 500,
+    );
+  }
+
+  /// 获取背景图 URL（Backdrop 图片）
+  String? getBackdropUrl({
+    required String serverUrl,
+    required String itemId,
+    int? width,
+  }) {
+    return getImageUrl(
+      serverUrl: serverUrl,
+      itemId: itemId,
+      imageType: 'Backdrop',
+      maxWidth: width ?? 1920,
+    );
+  }
 
   Future<EmbyAuthSession> authenticate({
     required String serverUrl,
@@ -296,7 +359,25 @@ class EmbyClient {
       episodeNumber: _asInt(item['IndexNumber']),
       productionYear: _asInt(item['ProductionYear']),
       runtime: _runtimeFromTicks(item['RunTimeTicks']),
+      overview: item['Overview']?.toString(),
+      communityRating: _asDouble(item['CommunityRating']),
+      imageBlurHash: _extractImageBlurHash(item),
     );
+  }
+
+  String? _extractImageBlurHash(Map<String, dynamic> item) {
+    final imageTags = item['ImageTags'];
+    if (imageTags is Map) {
+      return imageTags['Primary']?.toString();
+    }
+    return null;
+  }
+
+  double? _asDouble(Object? value) {
+    if (value == null) return null;
+    if (value is double) return value;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString());
   }
 
   Uri _apiUri(
