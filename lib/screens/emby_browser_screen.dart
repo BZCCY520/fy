@@ -7,6 +7,7 @@ import '../widgets/liquid_glass/liquid_glass_button.dart';
 import '../widgets/liquid_glass/liquid_glass_card.dart';
 import '../emby_client.dart';
 import '../settings_store.dart';
+import 'media_detail_screen.dart';
 
 class EmbyBrowserScreen extends StatefulWidget {
   const EmbyBrowserScreen({
@@ -110,31 +111,16 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
   }
 
   Future<void> _playVideo(EmbyVideoItem item) async {
-    try {
-      final source = await _embyClient.getPlaybackSource(
-        settings: widget.settings,
-        itemId: item.id,
-      );
-
-      if (!mounted) return;
-
-      // TODO: 实现原生播放器
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('准备播放：${item.displayTitle}\n${source.directStreamUri}'),
-          duration: const Duration(seconds: 3),
-          action: SnackBarAction(
-            label: '确定',
-            onPressed: () {},
-          ),
+    // 导航到媒体详情页
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MediaDetailScreen(
+          item: item,
+          settings: widget.settings,
         ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('加载视频失败：$error')),
-      );
-    }
+      ),
+    );
   }
 
   @override
