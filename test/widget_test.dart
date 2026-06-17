@@ -1,13 +1,13 @@
-import 'package:ai_subtitle_translator/main.dart';
+import 'package:emby_media_player/main.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('loads AI subtitle app', (tester) async {
-    await tester.pumpWidget(const AISubtitleApp());
+  testWidgets('loads Emby player app', (tester) async {
+    await tester.pumpWidget(const EmbyPlayerApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('AI 字幕'), findsWidgets);
+    expect(find.text('Emby 媒体播放器'), findsWidgets);
   });
 }

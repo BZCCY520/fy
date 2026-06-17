@@ -6,7 +6,6 @@ import '../widgets/liquid_glass/liquid_glass_button.dart';
 import '../widgets/liquid_glass/liquid_glass_card.dart';
 import '../emby_client.dart';
 import '../settings_store.dart';
-import 'video_player_screen.dart';
 
 class EmbyBrowserScreen extends StatefulWidget {
   const EmbyBrowserScreen({
@@ -118,12 +117,14 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
 
       if (!mounted) return;
 
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => VideoPlayerScreen(
-            videoUrl: source.directStreamUri.toString(),
-            title: item.displayTitle,
+      // TODO: 实现原生播放器
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('准备播放：${item.displayTitle}\n${source.directStreamUri}'),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: '确定',
+            onPressed: () {},
           ),
         ),
       );

@@ -1,33 +1,25 @@
-import 'package:ai_subtitle_translator/settings_store.dart';
+import 'package:emby_media_player/settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test(
-    'settings are ready with endpoint and model even when api key is empty',
-    () {
-      const settings = TranslationSettings(
-        endpoint: 'http://localhost:8080/v1/chat/completions',
-        apiKey: '',
-        model: 'local-model',
-      );
+  test('Emby settings defaults', () {
+    const settings = EmbySettings.defaults;
 
-      expect(settings.isReady, isTrue);
-    },
-  );
+    expect(settings.hasToken, isFalse);
+    expect(settings.serverUrl, isEmpty);
+    expect(settings.username, isEmpty);
+  });
 
-  test('settings are not ready without endpoint or model', () {
-    const missingEndpoint = TranslationSettings(
-      endpoint: '',
-      apiKey: '',
-      model: 'local-model',
-    );
-    const missingModel = TranslationSettings(
-      endpoint: 'http://localhost:8080/v1/chat/completions',
-      apiKey: '',
-      model: '',
+  test('Emby settings with token', () {
+    const settings = EmbySettings(
+      serverUrl: 'http://localhost:8096',
+      username: 'testuser',
+      userId: '12345',
+      accessToken: 'test-token',
     );
 
-    expect(missingEndpoint.isReady, isFalse);
-    expect(missingModel.isReady, isFalse);
+    expect(settings.hasToken, isTrue);
+    expect(settings.serverUrl, 'http://localhost:8096');
+    expect(settings.username, 'testuser');
   });
 }
