@@ -64,16 +64,10 @@ class LiquidGlassCard extends StatelessWidget {
     if (onTap != null) {
       return GestureDetector(
         onTap: onTap,
-        child: Container(
-          margin: margin,
-          child: card,
-        ),
+        child: Container(margin: margin, child: card),
       );
     }
 
-    return Container(
-      margin: margin,
-      child: card,
-    );
+    return Container(margin: margin, child: card);
   }
 }

@@ -10,10 +10,7 @@ import '../settings_store.dart';
 import 'media_detail_screen.dart';
 
 class EmbyBrowserScreen extends StatefulWidget {
-  const EmbyBrowserScreen({
-    super.key,
-    required this.settings,
-  });
+  const EmbyBrowserScreen({super.key, required this.settings});
 
   final EmbySettings settings;
 
@@ -104,9 +101,9 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
       });
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('搜索失败：$error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('搜索失败：$error')));
     }
   }
 
@@ -115,10 +112,8 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => MediaDetailScreen(
-          item: item,
-          settings: widget.settings,
-        ),
+        builder: (_) =>
+            MediaDetailScreen(item: item, settings: widget.settings),
       ),
     );
   }
@@ -216,8 +211,9 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
             padding: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
               color: LiquidGlassTheme.glassBackground,
-              borderRadius:
-                  BorderRadius.circular(LiquidGlassTheme.radiusMedium),
+              borderRadius: BorderRadius.circular(
+                LiquidGlassTheme.radiusMedium,
+              ),
               border: Border.all(color: LiquidGlassTheme.glassBorder),
             ),
             child: Row(
@@ -322,9 +318,7 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
   Widget _buildVideoGrid(List<EmbyVideoItem> videos) {
     if (_loading) {
       return const Center(
-        child: CircularProgressIndicator(
-          color: LiquidGlassTheme.accentBlue,
-        ),
+        child: CircularProgressIndicator(color: LiquidGlassTheme.accentBlue),
       );
     }
 
@@ -344,9 +338,7 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
               Text(
                 _errorText!,
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: LiquidGlassTheme.textSecondary,
-                ),
+                style: TextStyle(color: LiquidGlassTheme.textSecondary),
               ),
               const SizedBox(height: LiquidGlassTheme.spaceL),
               LiquidGlassButton(
@@ -425,9 +417,7 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
                   CachedNetworkImage(
                     imageUrl: posterUrl,
                     fit: BoxFit.cover,
-                    httpHeaders: {
-                      'X-Emby-Token': widget.settings.accessToken,
-                    },
+                    httpHeaders: {'X-Emby-Token': widget.settings.accessToken},
                     placeholder: (context, url) => Container(
                       color: LiquidGlassTheme.glassBackground,
                       child: Center(
@@ -480,6 +470,19 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
                       ),
                     ),
                   ),
+                  if (video.playbackPosition != null &&
+                      video.playbackPosition! > Duration.zero)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: LinearProgressIndicator(
+                        value: _resumeProgress(video),
+                        minHeight: 4,
+                        backgroundColor: Colors.black.withValues(alpha: 0.25),
+                        color: LiquidGlassTheme.accentBlue,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -542,5 +545,19 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
         ],
       ),
     );
+  }
+
+  double _resumeProgress(EmbyVideoItem item) {
+    final position = item.playbackPosition;
+    final runtime = item.runtime;
+    if (position == null || position <= Duration.zero) {
+      return 0;
+    }
+    if (runtime != null && runtime.inMilliseconds > 0) {
+      return (position.inMilliseconds / runtime.inMilliseconds)
+          .clamp(0, 1)
+          .toDouble();
+    }
+    return ((item.playedPercentage ?? 0) / 100).clamp(0, 1).toDouble();
   }
 }

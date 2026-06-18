@@ -4,9 +4,11 @@ import 'theme/liquid_glass_theme.dart';
 import 'screens/emby_browser_screen.dart';
 import 'screens/settings_screen.dart';
 import 'settings_store.dart';
+import 'native_player_bridge.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  NativePlayerBridge.initialize();
 
   // 设置系统 UI 样式 - 亮色模式
   SystemChrome.setSystemUIOverlayStyle(
@@ -116,9 +118,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () async {
                 await Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => const SettingsScreen(),
-                  ),
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
                 );
                 _loadSettings();
               },

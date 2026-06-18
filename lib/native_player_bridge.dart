@@ -2,7 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class NativePlayerBridge {
-  static const MethodChannel _channel = MethodChannel('ai_subtitle_translator/native_player');
+  static const MethodChannel _channel = MethodChannel(
+    'emby_media_player/native_player',
+  );
 
   /// 初始化原生播放器
   static Future<void> initialize() async {
@@ -22,13 +24,18 @@ class NativePlayerBridge {
     required String url,
     Map<String, String>? headers,
     bool enableDolby = true,
+    double? startPositionSeconds,
   }) async {
     try {
-      await _channel.invokeMethod('play', {
+      final arguments = <String, Object?>{
         'url': url,
         'headers': headers ?? {},
         'enableDolby': enableDolby,
-      });
+      };
+      if (startPositionSeconds != null) {
+        arguments['startPositionSeconds'] = startPositionSeconds;
+      }
+      await _channel.invokeMethod('play', arguments);
     } catch (e) {
       debugPrint('Failed to play video: $e');
       rethrow;
@@ -143,7 +150,7 @@ class NativePlayerBridge {
   static Future<List<Map<String, dynamic>>> getAudioTracks() async {
     try {
       final result = await _channel.invokeMethod('getAudioTracks');
-      return List<Map<String, dynamic>>.from(result as List);
+      return _trackListFromResult(result);
     } catch (e) {
       debugPrint('Failed to get audio tracks: $e');
       return [];
@@ -155,14 +162,53 @@ class NativePlayerBridge {
   /// [trackIndex] 音轨索引
   static Future<void> selectAudioTrack(int trackIndex) async {
     try {
-      await _channel.invokeMethod('selectAudioTrack', {'trackIndex': trackIndex});
+      await _channel.invokeMethod('selectAudioTrack', {
+        'trackIndex': trackIndex,
+      });
     } catch (e) {
       debugPrint('Failed to select audio track: $e');
     }
   }
 
+  /// 获取字幕轨道信息
+  static Future<List<Map<String, dynamic>>> getSubtitleTracks() async {
+    try {
+      final result = await _channel.invokeMethod('getSubtitleTracks');
+      return _trackListFromResult(result);
+    } catch (e) {
+      debugPrint('Failed to get subtitle tracks: $e');
+      return [];
+    }
+  }
+
+  /// 选择字幕轨道
+  ///
+  /// [trackIndex] 字幕轨道索引；传入 -1 表示关闭字幕。
+  static Future<void> selectSubtitleTrack(int trackIndex) async {
+    try {
+      await _channel.invokeMethod('selectSubtitleTrack', {
+        'trackIndex': trackIndex,
+      });
+    } catch (e) {
+      debugPrint('Failed to select subtitle track: $e');
+    }
+  }
+
+  static List<Map<String, dynamic>> _trackListFromResult(Object? result) {
+    if (result is! List) {
+      return [];
+    }
+
+    return result
+        .whereType<Map>()
+        .map((track) => Map<String, dynamic>.from(track))
+        .toList(growable: false);
+  }
+
   /// 设置播放器回调
-  static void setMethodCallHandler(Future<dynamic> Function(MethodCall call)? handler) {
+  static void setMethodCallHandler(
+    Future<dynamic> Function(MethodCall call)? handler,
+  ) {
     _channel.setMethodCallHandler(handler);
   }
 }

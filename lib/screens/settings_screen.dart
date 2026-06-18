@@ -17,7 +17,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _settingsStore = SettingsStore();
   final _embyClient = EmbyClient();
 
-  TranslationSettings _translationSettings = TranslationSettings.defaults;
   EmbySettings _embySettings = EmbySettings.defaults;
   bool _loading = true;
 
@@ -28,71 +27,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final translation = await _settingsStore.load();
     final emby = await _settingsStore.loadEmby();
     if (!mounted) return;
     setState(() {
-      _translationSettings = translation;
       _embySettings = emby;
       _loading = false;
     });
   }
 
-  Future<void> _showTranslationSettingsDialog() async {
-    final endpointController =
-        TextEditingController(text: _translationSettings.endpoint);
-    final apiKeyController =
-        TextEditingController(text: _translationSettings.apiKey);
-    final modelController =
-        TextEditingController(text: _translationSettings.model);
-
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: LiquidGlassTheme.background,
-        title: const Text('AI 翻译设置'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildTextField('Endpoint', endpointController),
-              const SizedBox(height: 16),
-              _buildTextField('API Key', apiKeyController, obscure: true),
-              const SizedBox(height: 16),
-              _buildTextField('Model', modelController),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () async {
-              final navigator = Navigator.of(context);
-              final updated = TranslationSettings(
-                endpoint: endpointController.text,
-                apiKey: apiKeyController.text,
-                model: modelController.text,
-              );
-              await _settingsStore.save(updated);
-              if (!mounted) return;
-              setState(() => _translationSettings = updated);
-              navigator.pop();
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _showEmbyConnectionDialog() async {
-    final serverController =
-        TextEditingController(text: _embySettings.serverUrl);
-    final usernameController =
-        TextEditingController(text: _embySettings.username);
+    final serverController = TextEditingController(
+      text: _embySettings.serverUrl,
+    );
+    final usernameController = TextEditingController(
+      text: _embySettings.username,
+    );
     final passwordController = TextEditingController();
 
     await showDialog(
@@ -142,9 +91,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               } catch (error) {
                 if (!mounted) return;
-                messenger.showSnackBar(
-                  SnackBar(content: Text('连接失败：$error')),
-                );
+                messenger.showSnackBar(SnackBar(content: Text('连接失败：$error')));
               }
             },
             child: const Text('连接'),
@@ -204,75 +151,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Row(
                         children: [
                           Icon(
-                            CupertinoIcons.sparkles,
-                            color: _translationSettings.isReady
-                                ? LiquidGlassTheme.success
-                                : LiquidGlassTheme.textTertiary,
-                          ),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              'AI 翻译',
-                              style: TextStyle(
-                                color: LiquidGlassTheme.textPrimary,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: (_translationSettings.isReady
-                                      ? LiquidGlassTheme.success
-                                      : LiquidGlassTheme.warning)
-                                  .withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(
-                                LiquidGlassTheme.radiusPill,
-                              ),
-                            ),
-                            child: Text(
-                              _translationSettings.isReady ? '已配置' : '待配置',
-                              style: TextStyle(
-                                color: _translationSettings.isReady
-                                    ? LiquidGlassTheme.success
-                                    : LiquidGlassTheme.warning,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        '配置 AI 翻译接口以使用字幕翻译功能',
-                        style: TextStyle(
-                          color: LiquidGlassTheme.textSecondary,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      LiquidGlassButton(
-                        text: '配置',
-                        icon: CupertinoIcons.settings,
-                        onPressed: _showTranslationSettingsDialog,
-                        width: double.infinity,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: LiquidGlassTheme.spaceM),
-                LiquidGlassCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
                             CupertinoIcons.tv,
                             color: _embySettings.hasToken
                                 ? LiquidGlassTheme.success
@@ -295,10 +173,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: (_embySettings.hasToken
-                                      ? LiquidGlassTheme.success
-                                      : LiquidGlassTheme.warning)
-                                  .withValues(alpha: 0.2),
+                              color:
+                                  (_embySettings.hasToken
+                                          ? LiquidGlassTheme.success
+                                          : LiquidGlassTheme.warning)
+                                      .withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(
                                 LiquidGlassTheme.radiusPill,
                               ),
@@ -367,10 +246,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      _buildInfoRow('应用名称', 'AI 字幕'),
-                      _buildInfoRow('版本', '2.0.0'),
+                      _buildInfoRow('应用名称', 'Emby 媒体播放器'),
+                      _buildInfoRow('版本', '3.0.0'),
                       _buildInfoRow('设计语言', 'Liquid Glass (iOS 26)'),
-                      _buildInfoRow('功能', '视频播放 · AI 字幕翻译'),
+                      _buildInfoRow('功能', 'Emby 媒体库 · 原生视频播放'),
                     ],
                   ),
                 ),

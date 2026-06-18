@@ -1,233 +1,105 @@
 # 贡献指南
 
-感谢你有兴趣为 AI 字幕项目做出贡献！
-
-## 行为准则
-
-请阅读并遵守我们的行为准则，确保社区对所有人都友好和包容。
+感谢你有兴趣为 Emby 媒体播放器项目做出贡献！
 
 ## 如何贡献
 
 ### 报告 Bug
 
-在提交 Bug 之前，请先搜索现有的 Issues 确认问题是否已被报告。
+提交 Bug 前请先搜索现有 Issues，确认问题是否已被报告。报告中建议包含：
 
-创建 Bug 报告时，请包含：
-
-- **清晰的标题和描述**
-- **重现步骤**（尽可能详细）
-- **预期行为**和**实际行为**
-- **截图**（如果适用）
-- **环境信息**（iOS 版本、设备型号、Flutter 版本等）
+- 清晰的问题标题和描述
+- 重现步骤、预期行为和实际行为
+- Emby Server 版本、iOS 版本、设备型号、Flutter 版本
+- 相关截图、日志或失败的视频格式/编码信息
 
 ### 建议新功能
 
-我们欢迎新功能建议！请通过 GitHub Issues 提交，并包含：
+欢迎通过 GitHub Issues 提交功能建议，请说明：
 
-- **功能描述**
-- **使用场景**
-- **可能的实现方案**
-- **是否愿意自己实现**
+- 功能目标和使用场景
+- 可能影响的模块（媒体库、播放器、设置、Emby API 等）
+- 是否愿意参与实现或测试
 
-### Pull Request 流程
+## Pull Request 流程
 
-1. **Fork 仓库**并创建你的分支
+1. Fork 仓库并创建分支：
    ```bash
    git checkout -b feature/my-new-feature
    ```
-
-2. **开发新功能**
-   - 遵循项目代码风格
-   - 添加必要的测试
-   - 更新相关文档
-
-3. **测试你的更改**
+2. 开发功能：
+   - 遵循现有 Liquid Glass UI 风格
+   - 为 Emby API/状态逻辑补充测试
+   - 更新 README 或相关文档
+3. 验证更改：
    ```bash
    flutter analyze
    flutter test
-   flutter run
    ```
-
-4. **提交更改**
+4. 提交更改：
    ```bash
    git commit -m "feat: add amazing feature"
    ```
-   
-   提交信息格式：
-   - `feat:` 新功能
-   - `fix:` Bug 修复
-   - `docs:` 文档更新
-   - `style:` 代码格式（不影响功能）
-   - `refactor:` 重构
-   - `test:` 测试相关
-   - `chore:` 构建/工具链相关
 
-5. **推送到你的 Fork**
-   ```bash
-   git push origin feature/my-new-feature
-   ```
-
-6. **创建 Pull Request**
-   - 填写 PR 模板
-   - 关联相关 Issues
-   - 等待代码审查
+提交信息建议使用：`feat:`、`fix:`、`docs:`、`style:`、`refactor:`、`test:`、`chore:`。
 
 ## 开发指南
 
 ### 环境设置
 
 ```bash
-# 克隆仓库
 git clone https://github.com/BZCCY520/fy.git
 cd fy
-
-# 安装依赖
 flutter pub get
-
-# 运行应用
 flutter run
 ```
 
-### 代码规范
+### 项目结构
 
-#### Dart 代码风格
-
-遵循 [Effective Dart](https://dart.dev/guides/language/effective-dart) 规范：
-
-```dart
-// ✅ 好的示例
-class LiquidGlassButton extends StatelessWidget {
-  const LiquidGlassButton({
-    super.key,
-    required this.onPressed,
-    this.text,
-  });
-
-  final VoidCallback onPressed;
-  final String? text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      // ...
-    );
-  }
-}
-```
-
-#### Liquid Glass 设计规范
-
-所有 UI 组件应遵循 Liquid Glass 设计语言：
-
-```dart
-// 使用主题常量
-import '../../theme/liquid_glass_theme.dart';
-
-Container(
-  decoration: BoxDecoration(
-    color: LiquidGlassTheme.glassBackground,
-    borderRadius: BorderRadius.circular(LiquidGlassTheme.radiusMedium),
-    border: Border.all(color: LiquidGlassTheme.glassBorder),
-  ),
-)
-```
-
-#### 文件组织
-
-```
+```text
 lib/
-├── main.dart                    # 应用入口
-├── theme/                       # 主题配置
-├── screens/                     # 页面级组件
-├── widgets/                     # 可复用组件
-│   ├── liquid_glass/           # Liquid Glass 组件
-│   └── subtitle/               # 字幕相关组件
-└── services/                    # 服务层（未来）
+├── main.dart                      # 应用入口
+├── emby_client.dart               # Emby API 客户端
+├── native_player_bridge.dart      # iOS 原生播放器桥接
+├── settings_store.dart            # Emby 设置存储
+├── screens/                       # 媒体库、详情、设置页面
+├── theme/                         # Liquid Glass 主题
+└── widgets/liquid_glass/          # 可复用玻璃组件
 ```
 
-### 测试
-
-#### 单元测试
+### 测试示例
 
 ```dart
-test('should translate text correctly', () async {
-  final translator = AiTranslator(client: mockClient);
-  final result = await translator.translate(
-    settings: settings,
-    text: 'Hello',
-    sourceLanguage: appLanguages[1],
-    targetLanguage: appLanguages[0],
-  );
-  expect(result, '你好');
+test('fetches video library items with token headers', () async {
+  final client = EmbyClient(client: mockClient);
+  final videos = await client.fetchVideos(settings: settings);
+  expect(videos, isNotEmpty);
 });
 ```
 
-#### Widget 测试
-
 ```dart
-testWidgets('loads AI subtitle app', (tester) async {
-  await tester.pumpWidget(const AISubtitleApp());
+testWidgets('loads Emby player app', (tester) async {
+  await tester.pumpWidget(const EmbyPlayerApp());
   await tester.pumpAndSettle();
-  
-  expect(find.text('AI 字幕'), findsWidgets);
+
+  expect(find.text('Emby 媒体播放器'), findsWidgets);
 });
 ```
 
-### 文档
+## 代码规范
 
-- 为新功能添加注释
-- 更新 README.md
-- 更新 CHANGELOG.md
-- 添加使用示例（如果适用）
+- Dart 代码遵循 Effective Dart 和 `flutter_lints`。
+- UI 优先复用 `LiquidGlassTheme`、`LiquidGlassCard`、`LiquidGlassButton`。
+- Emby 请求需要覆盖成功路径和关键参数断言。
+- 原生 iOS 改动应保持 MethodChannel 名称与 Dart 桥接一致。
 
-## 设计资源
+## 文档
 
-### Liquid Glass 参考
+新增或调整功能时，请同步更新：
 
-- [Apple Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/)
-- Liquid Glass 设计系统（iOS 26）
-
-### 颜色系统
-
-```dart
-background: Color(0xFF000000)      // 纯黑背景
-glassBackground: Color(0x33FFFFFF) // 半透明玻璃
-glassBorder: Color(0x1AFFFFFF)     // 玻璃边框
-accentBlue: Color(0xFF00A8FF)      // 强调色
-textPrimary: Color(0xFFFFFFFF)     // 主文本
-textSecondary: Color(0x99FFFFFF)   // 次要文本
-```
-
-### 动画规范
-
-```dart
-duration: Duration(milliseconds: 300)
-curve: Curves.easeInOutCubic
-scale: 0.95 - 1.0  // 点击缩放
-```
-
-## 审查流程
-
-1. **自动化检查**
-   - CI/CD 构建必须通过
-   - 代码分析无错误
-   - 所有测试通过
-
-2. **代码审查**
-   - 至少一位维护者审查
-   - 遵循代码规范
-   - 功能完整性
-   - 性能考虑
-
-3. **合并**
-   - 审查通过后合并到 main 分支
-   - 自动触发新构建
-
-## 社区
-
-- **GitHub Issues**: 讨论问题和新功能
-- **Pull Requests**: 代码贡献
-- **Discussions**: 一般性讨论
+- `README.md`
+- `CHANGELOG.md`
+- 相关重构/修复说明文档
 
 ## 许可证
 

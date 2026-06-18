@@ -19,8 +19,10 @@ class LiquidGlassButton extends StatefulWidget {
     this.borderColor,
     this.enabled = true,
     this.loading = false,
-  }) : assert(child != null || icon != null || text != null,
-            'Must provide either child, icon, or text');
+  }) : assert(
+         child != null || icon != null || text != null,
+         'Must provide either child, icon, or text',
+       );
 
   final VoidCallback? onPressed;
   final Widget? child;
@@ -68,17 +70,24 @@ class _LiquidGlassButtonState extends State<LiquidGlassButton> {
               height: widget.height,
               padding: widget.padding,
               decoration: BoxDecoration(
-                color: widget.backgroundColor ??
+                color:
+                    widget.backgroundColor ??
                     (isEnabled
                         ? LiquidGlassTheme.glassBackground
-                        : LiquidGlassTheme.glassBackground.withValues(alpha: 0.3)),
-                borderRadius:
-                    BorderRadius.circular(LiquidGlassTheme.radiusMedium),
+                        : LiquidGlassTheme.glassBackground.withValues(
+                            alpha: 0.3,
+                          )),
+                borderRadius: BorderRadius.circular(
+                  LiquidGlassTheme.radiusMedium,
+                ),
                 border: Border.all(
-                  color: widget.borderColor ??
+                  color:
+                      widget.borderColor ??
                       (isEnabled
                           ? LiquidGlassTheme.glassBorder
-                          : LiquidGlassTheme.glassBorder.withValues(alpha: 0.3)),
+                          : LiquidGlassTheme.glassBorder.withValues(
+                              alpha: 0.3,
+                            )),
                   width: 1.0,
                 ),
                 boxShadow: isEnabled
@@ -103,37 +112,39 @@ class _LiquidGlassButtonState extends State<LiquidGlassButton> {
                       ),
                     )
                   : widget.child ??
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          if (widget.icon != null) ...[
-                            Icon(
-                              widget.icon,
-                              color: widget.foregroundColor ??
-                                  (isEnabled
-                                      ? LiquidGlassTheme.textPrimary
-                                      : LiquidGlassTheme.textTertiary),
-                              size: 20,
-                            ),
-                            if (widget.text != null)
-                              const SizedBox(width: LiquidGlassTheme.spaceS),
-                          ],
-                          if (widget.text != null)
-                            Text(
-                              widget.text!,
-                              style: TextStyle(
-                                color: widget.foregroundColor ??
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (widget.icon != null) ...[
+                              Icon(
+                                widget.icon,
+                                color:
+                                    widget.foregroundColor ??
                                     (isEnabled
                                         ? LiquidGlassTheme.textPrimary
                                         : LiquidGlassTheme.textTertiary),
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: -0.2,
+                                size: 20,
                               ),
-                            ),
-                        ],
-                      ),
+                              if (widget.text != null)
+                                const SizedBox(width: LiquidGlassTheme.spaceS),
+                            ],
+                            if (widget.text != null)
+                              Text(
+                                widget.text!,
+                                style: TextStyle(
+                                  color:
+                                      widget.foregroundColor ??
+                                      (isEnabled
+                                          ? LiquidGlassTheme.textPrimary
+                                          : LiquidGlassTheme.textTertiary),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                          ],
+                        ),
             ),
           ),
         ),

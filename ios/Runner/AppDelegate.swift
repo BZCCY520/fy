@@ -1,12 +1,11 @@
 import Flutter
-import ActivityKit
 import AVFoundation
+import AVKit
 import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
-  private var translationActivity: Any?
-  private let pipController = TranslationPipController()
+  private let nativePlayerController = NativePlayerController()
 
   override func application(
     _ application: UIApplication,
@@ -17,67 +16,80 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    let channel = FlutterMethodChannel(
-      name: "ai_voice_translator/live_activity",
+    let nativePlayerChannel = FlutterMethodChannel(
+      name: "emby_media_player/native_player",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
     )
-    channel.setMethodCallHandler { [weak self] call, result in
+    nativePlayerChannel.setMethodCallHandler { [weak self] call, result in
       guard let self else {
         result(FlutterError(code: "app_delegate_unavailable", message: nil, details: nil))
         return
       }
-      switch call.method {
-      case "configureAudioSession":
-        self.configureAudioSession(result)
-      case "start":
-        self.startLiveActivity(call.arguments, result: result)
-      case "update":
-        self.updateLiveActivity(call.arguments, result: result)
-      case "end":
-        self.endLiveActivity(result)
-      default:
-        result(FlutterMethodNotImplemented)
-      }
+      self.nativePlayerController.handle(call, result: result)
     }
+  }
+}
 
-    let pipChannel = FlutterMethodChannel(
-      name: "ai_voice_translator/pip",
-      binaryMessenger: engineBridge.applicationRegistrar.messenger()
-    )
-    pipChannel.setMethodCallHandler { [weak self] call, result in
-      guard let self else {
-        result(FlutterError(code: "app_delegate_unavailable", message: nil, details: nil))
-        return
+private final class NativePlayerController: NSObject {
+  private var player: AVPlayer?
+  private var playerViewController: AVPlayerViewController?
+  private var preferredRate: Float = 1.0
+
+  func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "initialize":
+      initialize(result)
+    case "play":
+      play(call.arguments, result: result)
+    case "pause":
+      player?.pause()
+      result(true)
+    case "resume":
+      if let player {
+        player.rate = preferredRate
       }
-      switch call.method {
-      case "isSupported":
-        result(self.pipController.isSupported)
-      case "start":
-        self.pipController.start(call.arguments, result: result)
-      case "update":
-        self.pipController.update(call.arguments, result: result)
-      case "stop":
-        self.pipController.stop(result)
-      default:
-        result(FlutterMethodNotImplemented)
+      result(true)
+    case "stop":
+      DispatchQueue.main.async { [weak self] in
+        self?.stopPlayback(animated: true) {
+          result(true)
+        }
       }
+    case "seekTo":
+      seekTo(call.arguments, result: result)
+    case "getCurrentTime":
+      result(seconds(from: player?.currentTime()))
+    case "getDuration":
+      result(seconds(from: player?.currentItem?.duration))
+    case "isPlaying":
+      result((player?.rate ?? 0) > 0)
+    case "setPlaybackRate":
+      setPlaybackRate(call.arguments, result: result)
+    case "setVolume":
+      setVolume(call.arguments, result: result)
+    case "isDolbySupported":
+      result(true)
+    case "getAudioTracks":
+      result(audioTracks())
+    case "selectAudioTrack":
+      selectAudioTrack(call.arguments, result: result)
+    case "getSubtitleTracks":
+      result(subtitleTracks())
+    case "selectSubtitleTrack":
+      selectSubtitleTrack(call.arguments, result: result)
+    default:
+      result(FlutterMethodNotImplemented)
     }
   }
 
-  private func configureAudioSession(_ result: FlutterResult) {
+  private func initialize(_ result: FlutterResult) {
     do {
-      let session = AVAudioSession.sharedInstance()
-      try session.setCategory(
-        .playAndRecord,
-        mode: .default,
-        options: [.mixWithOthers, .defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
-      )
-      try session.setActive(true)
+      try configurePlaybackAudioSession()
       result(true)
     } catch {
       result(
         FlutterError(
-          code: "audio_session_failed",
+          code: "native_player_init_failed",
           message: error.localizedDescription,
           details: nil
         )
@@ -85,122 +97,321 @@ import UIKit
     }
   }
 
-  private func startLiveActivity(_ rawArguments: Any?, result: @escaping FlutterResult) {
-    guard #available(iOS 16.1, *) else {
-      result(false)
-      return
-    }
+  private func play(_ rawArguments: Any?, result: @escaping FlutterResult) {
     let args = rawArguments as? [String: Any] ?? [:]
-    let attributes = TranslationActivityAttributes(
-      sourceLanguage: stringValue(args, "sourceLanguage", fallback: "Source"),
-      targetLanguage: stringValue(args, "targetLanguage", fallback: "Target")
-    )
-    let state = activityState(args, fallbackStatus: "视频听译中")
-
-    do {
-      if #available(iOS 16.2, *) {
-        let content = ActivityContent(
-          state: state,
-          staleDate: Date().addingTimeInterval(15 * 60)
-        )
-        translationActivity = try Activity<TranslationActivityAttributes>.request(
-          attributes: attributes,
-          content: content,
-          pushType: nil
-        )
-      } else {
-        translationActivity = try Activity<TranslationActivityAttributes>.request(
-          attributes: attributes,
-          contentState: state,
-          pushType: nil
-        )
-      }
-      result(true)
-    } catch {
+    guard let urlString = args["url"] as? String,
+          let url = URL(string: urlString),
+          !urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
       result(
         FlutterError(
-          code: "live_activity_start_failed",
-          message: error.localizedDescription,
+          code: "invalid_url",
+          message: "缺少或无法识别视频 URL。",
           details: nil
         )
       )
+      return
+    }
+
+    let headers = args["headers"] as? [String: String] ?? [:]
+    let startPositionSeconds = doubleValue(args["startPositionSeconds"], fallback: 0)
+
+    DispatchQueue.main.async { [weak self] in
+      guard let self else {
+        result(FlutterError(code: "native_player_unavailable", message: nil, details: nil))
+        return
+      }
+
+      do {
+        try self.configurePlaybackAudioSession()
+      } catch {
+        result(
+          FlutterError(
+            code: "audio_session_failed",
+            message: error.localizedDescription,
+            details: nil
+          )
+        )
+        return
+      }
+
+      guard let presenter = self.topViewController() else {
+        result(
+          FlutterError(
+            code: "presenter_not_found",
+            message: "无法找到当前界面来展示播放器。",
+            details: nil
+          )
+        )
+        return
+      }
+
+      self.stopPlayback(animated: false) {
+        let assetOptions: [String: Any] = headers.isEmpty
+          ? [:]
+          : [AVURLAssetHTTPHeaderFieldsKey: headers]
+        let asset = AVURLAsset(url: url, options: assetOptions)
+        let item = AVPlayerItem(asset: asset)
+        let player = AVPlayer(playerItem: item)
+        player.automaticallyWaitsToMinimizeStalling = true
+
+        let playerViewController = AVPlayerViewController()
+        playerViewController.player = player
+        playerViewController.modalPresentationStyle = .fullScreen
+        playerViewController.allowsPictureInPicturePlayback =
+          AVPictureInPictureController.isPictureInPictureSupported()
+        if #available(iOS 14.2, *) {
+          playerViewController.canStartPictureInPictureAutomaticallyFromInline = true
+        }
+
+        self.player = player
+        self.playerViewController = playerViewController
+        self.preferredRate = 1.0
+
+        presenter.present(playerViewController, animated: true) {
+          let startPlayback = {
+            player.play()
+            result(true)
+          }
+          if startPositionSeconds > 0 {
+            let startTime = CMTime(seconds: startPositionSeconds, preferredTimescale: 600)
+            player.seek(to: startTime, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+              startPlayback()
+            }
+          } else {
+            startPlayback()
+          }
+        }
+      }
     }
   }
 
-  private func updateLiveActivity(_ rawArguments: Any?, result: @escaping FlutterResult) {
-    guard #available(iOS 16.1, *) else {
-      result(false)
-      return
-    }
-    guard let activity = translationActivity as? Activity<TranslationActivityAttributes> else {
-      startLiveActivity(rawArguments, result: result)
-      return
-    }
-
+  private func seekTo(_ rawArguments: Any?, result: @escaping FlutterResult) {
     let args = rawArguments as? [String: Any] ?? [:]
-    let state = activityState(args, fallbackStatus: "视频听译中")
-    Task {
-      if #available(iOS 16.2, *) {
-        let content = ActivityContent(
-          state: state,
-          staleDate: Date().addingTimeInterval(15 * 60)
-        )
-        await activity.update(content)
-      } else {
-        await activity.update(using: state)
-      }
-      result(true)
+    let targetSeconds = doubleValue(args["seconds"], fallback: 0)
+    let time = CMTime(seconds: targetSeconds, preferredTimescale: 600)
+    player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { finished in
+      result(finished)
     }
   }
 
-  private func endLiveActivity(_ result: @escaping FlutterResult) {
-    guard #available(iOS 16.1, *) else {
-      result(false)
+  private func setPlaybackRate(_ rawArguments: Any?, result: FlutterResult) {
+    let args = rawArguments as? [String: Any] ?? [:]
+    let requestedRate = Float(doubleValue(args["rate"], fallback: 1.0))
+    let clampedRate = min(max(requestedRate, 0.5), 2.0)
+    preferredRate = clampedRate
+    if let player, player.rate > 0 {
+      player.rate = clampedRate
+    }
+    result(true)
+  }
+
+  private func setVolume(_ rawArguments: Any?, result: FlutterResult) {
+    let args = rawArguments as? [String: Any] ?? [:]
+    let requestedVolume = Float(doubleValue(args["volume"], fallback: 1.0))
+    player?.volume = min(max(requestedVolume, 0.0), 1.0)
+    result(true)
+  }
+
+  private func mediaTracks(
+    for characteristic: AVMediaCharacteristic,
+    includeOffOption: Bool = false
+  ) -> [[String: Any]] {
+    guard let item = player?.currentItem,
+          let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: characteristic)
+    else {
+      return []
+    }
+
+    let selectedOption = item.currentMediaSelection.selectedMediaOption(in: group)
+    var tracks: [[String: Any]] = []
+
+    if includeOffOption {
+      tracks.append([
+        "index": -1,
+        "id": "off",
+        "displayName": "关闭字幕",
+        "languageCode": "",
+        "isSelected": selectedOption == nil,
+        "isOff": true,
+      ])
+    }
+
+    tracks.append(
+      contentsOf: group.options.enumerated().map { index, option in
+        [
+          "index": index,
+          "id": option.propertyList().description,
+          "displayName": option.displayName,
+          "languageCode": option.extendedLanguageTag ?? option.locale?.identifier ?? "",
+          "isSelected": selectedOption == option,
+          "isOff": false,
+        ]
+      }
+    )
+
+    return tracks
+  }
+
+  private func audioTracks() -> [[String: Any]] {
+    mediaTracks(for: .audible)
+  }
+
+  private func subtitleTracks() -> [[String: Any]] {
+    mediaTracks(for: .legible, includeOffOption: true)
+  }
+
+  private func selectAudioTrack(_ rawArguments: Any?, result: FlutterResult) {
+    selectMediaTrack(
+      rawArguments,
+      characteristic: .audible,
+      allowEmptySelection: false,
+      errorCode: "audio_track_not_found",
+      errorMessage: "无法找到指定音轨。",
+      result: result
+    )
+  }
+
+  private func selectSubtitleTrack(_ rawArguments: Any?, result: FlutterResult) {
+    selectMediaTrack(
+      rawArguments,
+      characteristic: .legible,
+      allowEmptySelection: true,
+      errorCode: "subtitle_track_not_found",
+      errorMessage: "无法找到指定字幕轨道。",
+      result: result
+    )
+  }
+
+  private func selectMediaTrack(
+    _ rawArguments: Any?,
+    characteristic: AVMediaCharacteristic,
+    allowEmptySelection: Bool,
+    errorCode: String,
+    errorMessage: String,
+    result: FlutterResult
+  ) {
+    let args = rawArguments as? [String: Any] ?? [:]
+    let trackIndex = intValue(args["trackIndex"], fallback: -1)
+    guard let item = player?.currentItem,
+          let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: characteristic)
+    else {
+      result(
+        FlutterError(
+          code: errorCode,
+          message: errorMessage,
+          details: nil
+        )
+      )
       return
     }
-    guard let activity = translationActivity as? Activity<TranslationActivityAttributes> else {
+
+    if trackIndex < 0, allowEmptySelection {
+      item.select(nil, in: group)
       result(true)
       return
     }
-    translationActivity = nil
-    let finalState = TranslationActivityAttributes.ContentState(
-      status: "已停止",
-      transcript: "",
-      translation: ""
-    )
-    Task {
-      if #available(iOS 16.2, *) {
-        await activity.end(
-          ActivityContent(state: finalState, staleDate: nil),
-          dismissalPolicy: .immediate
+
+    guard group.options.indices.contains(trackIndex) else {
+      result(
+        FlutterError(
+          code: errorCode,
+          message: errorMessage,
+          details: nil
         )
-      } else {
-        await activity.end(using: finalState, dismissalPolicy: .immediate)
-      }
-      result(true)
+      )
+      return
+    }
+
+    item.select(group.options[trackIndex], in: group)
+    result(true)
+  }
+
+  private func stopPlayback(animated: Bool, completion: @escaping () -> Void) {
+    player?.pause()
+
+    guard let playerViewController else {
+      player = nil
+      completion()
+      return
+    }
+
+    let cleanup = { [weak self] in
+      self?.player = nil
+      self?.playerViewController = nil
+      completion()
+    }
+
+    if playerViewController.presentingViewController != nil {
+      playerViewController.dismiss(animated: animated, completion: cleanup)
+    } else {
+      cleanup()
     }
   }
 
-  @available(iOS 16.1, *)
-  private func activityState(
-    _ args: [String: Any],
-    fallbackStatus: String
-  ) -> TranslationActivityAttributes.ContentState {
-    TranslationActivityAttributes.ContentState(
-      status: stringValue(args, "status", fallback: fallbackStatus),
-      transcript: stringValue(args, "transcript", fallback: ""),
-      translation: stringValue(args, "translation", fallback: "")
+  private func configurePlaybackAudioSession() throws {
+    let session = AVAudioSession.sharedInstance()
+    try session.setCategory(
+      .playback,
+      mode: .moviePlayback,
+      options: [.allowAirPlay, .allowBluetoothA2DP]
     )
+    try session.setActive(true)
   }
 
-  private func stringValue(
-    _ args: [String: Any],
-    _ key: String,
-    fallback: String
-  ) -> String {
-    guard let value = args[key] as? String, !value.isEmpty else {
-      return fallback
+  private func topViewController() -> UIViewController? {
+    let root = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .flatMap { $0.windows }
+      .first { $0.isKeyWindow }?
+      .rootViewController
+    return topViewController(from: root)
+  }
+
+  private func topViewController(from controller: UIViewController?) -> UIViewController? {
+    if let navigationController = controller as? UINavigationController {
+      return topViewController(from: navigationController.visibleViewController)
     }
-    return value
+    if let tabBarController = controller as? UITabBarController {
+      return topViewController(from: tabBarController.selectedViewController)
+    }
+    if let presented = controller?.presentedViewController {
+      return topViewController(from: presented)
+    }
+    return controller
+  }
+
+  private func doubleValue(_ rawValue: Any?, fallback: Double) -> Double {
+    if let value = rawValue as? Double {
+      return value
+    }
+    if let value = rawValue as? NSNumber {
+      return value.doubleValue
+    }
+    if let value = rawValue as? String, let parsed = Double(value) {
+      return parsed
+    }
+    return fallback
+  }
+
+  private func intValue(_ rawValue: Any?, fallback: Int) -> Int {
+    if let value = rawValue as? Int {
+      return value
+    }
+    if let value = rawValue as? NSNumber {
+      return value.intValue
+    }
+    if let value = rawValue as? String, let parsed = Int(value) {
+      return parsed
+    }
+    return fallback
+  }
+
+  private func seconds(from time: CMTime?) -> Double {
+    guard let time, time.isNumeric else {
+      return 0
+    }
+    let value = CMTimeGetSeconds(time)
+    return value.isFinite ? value : 0
   }
 }

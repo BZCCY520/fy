@@ -16,6 +16,22 @@ class EmbyAuthSession {
   final String accessToken;
 }
 
+class EmbyPerson {
+  const EmbyPerson({
+    required this.id,
+    required this.name,
+    this.role,
+    this.type,
+    this.primaryImageTag,
+  });
+
+  final String id;
+  final String name;
+  final String? role;
+  final String? type;
+  final String? primaryImageTag;
+}
+
 class EmbyVideoItem {
   const EmbyVideoItem({
     required this.id,
@@ -29,6 +45,16 @@ class EmbyVideoItem {
     this.overview,
     this.communityRating,
     this.imageBlurHash,
+    this.officialRating,
+    this.genres = const [],
+    this.studios = const [],
+    this.people = const [],
+    this.playbackPosition,
+    this.playedPercentage,
+    this.isPlayed,
+    this.isFavorite,
+    this.playCount,
+    this.lastPlayedDate,
   });
 
   final String id;
@@ -42,6 +68,64 @@ class EmbyVideoItem {
   final String? overview;
   final double? communityRating;
   final String? imageBlurHash;
+  final String? officialRating;
+  final List<String> genres;
+  final List<String> studios;
+  final List<EmbyPerson> people;
+  final Duration? playbackPosition;
+  final double? playedPercentage;
+  final bool? isPlayed;
+  final bool? isFavorite;
+  final int? playCount;
+  final DateTime? lastPlayedDate;
+
+  EmbyVideoItem copyWith({
+    String? id,
+    String? name,
+    String? type,
+    String? seriesName,
+    int? seasonNumber,
+    int? episodeNumber,
+    int? productionYear,
+    Duration? runtime,
+    String? overview,
+    double? communityRating,
+    String? imageBlurHash,
+    String? officialRating,
+    List<String>? genres,
+    List<String>? studios,
+    List<EmbyPerson>? people,
+    Duration? playbackPosition,
+    double? playedPercentage,
+    bool? isPlayed,
+    bool? isFavorite,
+    int? playCount,
+    DateTime? lastPlayedDate,
+  }) {
+    return EmbyVideoItem(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      type: type ?? this.type,
+      seriesName: seriesName ?? this.seriesName,
+      seasonNumber: seasonNumber ?? this.seasonNumber,
+      episodeNumber: episodeNumber ?? this.episodeNumber,
+      productionYear: productionYear ?? this.productionYear,
+      runtime: runtime ?? this.runtime,
+      overview: overview ?? this.overview,
+      communityRating: communityRating ?? this.communityRating,
+      imageBlurHash: imageBlurHash ?? this.imageBlurHash,
+      officialRating: officialRating ?? this.officialRating,
+      genres: genres ?? this.genres,
+      studios: studios ?? this.studios,
+      people: people ?? this.people,
+      playbackPosition: playbackPosition ?? this.playbackPosition,
+      playedPercentage: playedPercentage ?? this.playedPercentage,
+      isPlayed: isPlayed ?? this.isPlayed,
+      isFavorite: isFavorite ?? this.isFavorite,
+      playCount: playCount ?? this.playCount,
+      lastPlayedDate: lastPlayedDate ?? this.lastPlayedDate,
+    );
+  }
 
   String get displayTitle {
     if (seriesName != null && seriesName!.trim().isNotEmpty) {
@@ -99,10 +183,10 @@ class EmbyPlaybackSource {
 class EmbyClient {
   EmbyClient({http.Client? client}) : _client = client ?? http.Client();
 
-  static const _clientName = 'AI Voice Translator';
+  static const _clientName = 'Emby Media Player';
   static const _deviceName = 'Flutter';
-  static const _deviceId = 'ai_voice_translator_flutter';
-  static const _version = '1.0.0';
+  static const _deviceId = 'emby_media_player_flutter';
+  static const _version = '3.0.0';
 
   final http.Client _client;
 
@@ -122,17 +206,16 @@ class EmbyClient {
     int? maxHeight,
     int quality = 90,
   }) {
-    final query = <String, String>{
-      'quality': quality.toString(),
-    };
+    final query = <String, String>{'quality': quality.toString()};
     if (maxWidth != null) query['maxWidth'] = maxWidth.toString();
     if (maxHeight != null) query['maxHeight'] = maxHeight.toString();
 
-    return _apiUri(
-      serverUrl,
-      ['Items', itemId, 'Images', imageType],
-      query,
-    ).toString();
+    return _apiUri(serverUrl, [
+      'Items',
+      itemId,
+      'Images',
+      imageType,
+    ], query).toString();
   }
 
   /// 获取海报 URL（Primary 图片）
@@ -218,7 +301,7 @@ class EmbyClient {
       'SortOrder': 'Descending',
       'Limit': limit.toString(),
       'Fields':
-          'MediaSources,Overview,SeriesName,ParentIndexNumber,IndexNumber,RunTimeTicks,ProductionYear',
+          'MediaSources,Overview,SeriesName,ParentIndexNumber,IndexNumber,RunTimeTicks,ProductionYear,CommunityRating,UserData',
       if (searchTerm != null && searchTerm.trim().isNotEmpty)
         'SearchTerm': searchTerm.trim(),
     };
@@ -249,6 +332,183 @@ class EmbyClient {
         .map(_parseVideoItem)
         .where((item) => item.id.isNotEmpty)
         .toList(growable: false);
+  }
+
+  Future<EmbyVideoItem> fetchMediaDetails({
+    required EmbySettings settings,
+    required String itemId,
+  }) async {
+    _ensureAuthorized(settings);
+    final uri = _apiUri(
+      settings.serverUrl,
+      ['Users', settings.userId.trim(), 'Items', itemId],
+      {
+        'Fields':
+            'Overview,Genres,Studios,People,ProductionYear,RunTimeTicks,CommunityRating,OfficialRating,UserData,ParentIndexNumber,IndexNumber,SeriesName',
+      },
+    );
+    final response = await _client
+        .get(uri, headers: _authorizedHeaders(settings.accessToken))
+        .timeout(const Duration(seconds: 30));
+
+    final decodedText = utf8.decode(response.bodyBytes);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(_extractErrorMessage(decodedText, response.statusCode));
+    }
+
+    final decoded = jsonDecode(decodedText);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Emby 媒体详情响应格式无法识别。');
+    }
+
+    return _parseVideoItem(decoded);
+  }
+
+  Future<Duration?> getResumePoint({
+    required EmbySettings settings,
+    required String itemId,
+  }) async {
+    final details = await fetchMediaDetails(settings: settings, itemId: itemId);
+    return details.playbackPosition;
+  }
+
+  Future<void> updatePlaybackProgress({
+    required EmbySettings settings,
+    required String itemId,
+    required Duration position,
+    Duration? runtime,
+    bool isPaused = false,
+  }) async {
+    _ensureAuthorized(settings);
+    final uri = _apiUri(settings.serverUrl, [
+      'Sessions',
+      'Playing',
+      'Progress',
+    ]);
+    final response = await _client
+        .post(
+          uri,
+          headers: _jsonAuthorizedHeaders(settings.accessToken),
+          body: jsonEncode({
+            'ItemId': itemId,
+            'PositionTicks': _durationToTicks(position),
+            if (runtime != null) 'RunTimeTicks': _durationToTicks(runtime),
+            'IsPaused': isPaused,
+            'CanSeek': true,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final decodedText = utf8.decode(response.bodyBytes);
+      throw Exception(_extractErrorMessage(decodedText, response.statusCode));
+    }
+  }
+
+  Future<void> markPlayed({
+    required EmbySettings settings,
+    required String itemId,
+    bool played = true,
+  }) async {
+    _ensureAuthorized(settings);
+    final uri = _apiUri(settings.serverUrl, [
+      'Users',
+      settings.userId.trim(),
+      'PlayedItems',
+      itemId,
+    ]);
+    final response =
+        await (played
+                ? _client.post(
+                    uri,
+                    headers: _authorizedHeaders(settings.accessToken),
+                  )
+                : _client.delete(
+                    uri,
+                    headers: _authorizedHeaders(settings.accessToken),
+                  ))
+            .timeout(const Duration(seconds: 30));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final decodedText = utf8.decode(response.bodyBytes);
+      throw Exception(_extractErrorMessage(decodedText, response.statusCode));
+    }
+  }
+
+  Future<void> setFavorite({
+    required EmbySettings settings,
+    required String itemId,
+    required bool isFavorite,
+  }) async {
+    _ensureAuthorized(settings);
+    final uri = _apiUri(settings.serverUrl, [
+      'Users',
+      settings.userId.trim(),
+      'FavoriteItems',
+      itemId,
+    ]);
+    final response =
+        await (isFavorite
+                ? _client.post(
+                    uri,
+                    headers: _authorizedHeaders(settings.accessToken),
+                  )
+                : _client.delete(
+                    uri,
+                    headers: _authorizedHeaders(settings.accessToken),
+                  ))
+            .timeout(const Duration(seconds: 30));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final decodedText = utf8.decode(response.bodyBytes);
+      throw Exception(_extractErrorMessage(decodedText, response.statusCode));
+    }
+  }
+
+  Future<List<EmbyVideoItem>> getRecommendations({
+    required EmbySettings settings,
+    required String itemId,
+    int limit = 12,
+  }) async {
+    _ensureAuthorized(settings);
+    final uri = _apiUri(
+      settings.serverUrl,
+      ['Items', itemId, 'Similar'],
+      {
+        'UserId': settings.userId.trim(),
+        'Limit': limit.toString(),
+        'Fields':
+            'Overview,SeriesName,ParentIndexNumber,IndexNumber,RunTimeTicks,ProductionYear,CommunityRating,UserData',
+      },
+    );
+    final response = await _client
+        .get(uri, headers: _authorizedHeaders(settings.accessToken))
+        .timeout(const Duration(seconds: 30));
+
+    final decodedText = utf8.decode(response.bodyBytes);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(_extractErrorMessage(decodedText, response.statusCode));
+    }
+
+    final decoded = jsonDecode(decodedText);
+    if (decoded is Map<String, dynamic>) {
+      final items = decoded['Items'];
+      if (items is List) {
+        return items
+            .whereType<Map<String, dynamic>>()
+            .map(_parseVideoItem)
+            .where((item) => item.id.isNotEmpty && item.id != itemId)
+            .toList(growable: false);
+      }
+    }
+    if (decoded is List) {
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map(_parseVideoItem)
+          .where((item) => item.id.isNotEmpty && item.id != itemId)
+          .toList(growable: false);
+    }
+    return const [];
   }
 
   Future<EmbyPlaybackSource> getPlaybackSource({
@@ -362,6 +622,18 @@ class EmbyClient {
       overview: item['Overview']?.toString(),
       communityRating: _asDouble(item['CommunityRating']),
       imageBlurHash: _extractImageBlurHash(item),
+      officialRating: item['OfficialRating']?.toString(),
+      genres: _asStringList(item['Genres']),
+      studios: _parseStudios(item['Studios']),
+      people: _parsePeople(item['People']),
+      playbackPosition: _runtimeFromTicks(
+        _userData(item)?['PlaybackPositionTicks'],
+      ),
+      playedPercentage: _asDouble(_userData(item)?['PlayedPercentage']),
+      isPlayed: _asBool(_userData(item)?['Played']),
+      isFavorite: _asBool(_userData(item)?['IsFavorite']),
+      playCount: _asInt(_userData(item)?['PlayCount']),
+      lastPlayedDate: _asDateTime(_userData(item)?['LastPlayedDate']),
     );
   }
 
@@ -469,6 +741,10 @@ class EmbyClient {
     };
   }
 
+  Map<String, String> _jsonAuthorizedHeaders(String token) {
+    return {..._authorizedHeaders(token), 'Content-Type': 'application/json'};
+  }
+
   String get _authorizationHeader =>
       'Emby Client="$_clientName", Device="$_deviceName", '
       'DeviceId="$_deviceId", Version="$_version"';
@@ -507,6 +783,55 @@ class EmbyClient {
     }
   }
 
+  Map<String, dynamic>? _userData(Map<String, dynamic> item) {
+    final userData = item['UserData'];
+    return userData is Map<String, dynamic> ? userData : null;
+  }
+
+  List<String> _asStringList(Object? value) {
+    if (value is! List) {
+      return const [];
+    }
+    return value
+        .map((entry) => entry?.toString().trim() ?? '')
+        .where((entry) => entry.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  List<String> _parseStudios(Object? value) {
+    if (value is! List) {
+      return const [];
+    }
+    return value
+        .map((entry) {
+          if (entry is Map<String, dynamic>) {
+            return entry['Name']?.toString().trim() ?? '';
+          }
+          return entry?.toString().trim() ?? '';
+        })
+        .where((entry) => entry.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  List<EmbyPerson> _parsePeople(Object? value) {
+    if (value is! List) {
+      return const [];
+    }
+    return value
+        .whereType<Map<String, dynamic>>()
+        .map(
+          (person) => EmbyPerson(
+            id: person['Id']?.toString() ?? '',
+            name: person['Name']?.toString() ?? '',
+            role: person['Role']?.toString(),
+            type: person['Type']?.toString(),
+            primaryImageTag: person['PrimaryImageTag']?.toString(),
+          ),
+        )
+        .where((person) => person.name.trim().isNotEmpty)
+        .toList(growable: false);
+  }
+
   String? _safeContainer(String? value) {
     if (value == null || value.trim().isEmpty) {
       return null;
@@ -543,6 +868,34 @@ class EmbyClient {
       return null;
     }
     return Duration(microseconds: ticks ~/ 10);
+  }
+
+  int _durationToTicks(Duration duration) {
+    return duration.inMicroseconds * 10;
+  }
+
+  bool? _asBool(Object? value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is bool) {
+      return value;
+    }
+    final normalized = value.toString().trim().toLowerCase();
+    if (normalized == 'true' || normalized == '1') {
+      return true;
+    }
+    if (normalized == 'false' || normalized == '0') {
+      return false;
+    }
+    return null;
+  }
+
+  DateTime? _asDateTime(Object? value) {
+    if (value == null) {
+      return null;
+    }
+    return DateTime.tryParse(value.toString());
   }
 
   int? _asInt(Object? value) {
