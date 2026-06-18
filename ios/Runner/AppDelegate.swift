@@ -149,7 +149,7 @@ private final class NativePlayerController: NSObject {
       self.stopPlayback(animated: false) {
         let assetOptions: [String: Any] = headers.isEmpty
           ? [:]
-          : [AVURLAssetHTTPHeaderFieldsKey: headers]
+          : ["AVURLAssetHTTPHeaderFieldsKey": headers]
         let asset = AVURLAsset(url: url, options: assetOptions)
         let item = AVPlayerItem(asset: asset)
         let player = AVPlayer(playerItem: item)
@@ -241,7 +241,7 @@ private final class NativePlayerController: NSObject {
       contentsOf: group.options.enumerated().map { index, option in
         [
           "index": index,
-          "id": option.propertyList().description,
+          "id": String(describing: option.propertyList()),
           "displayName": option.displayName,
           "languageCode": option.extendedLanguageTag ?? option.locale?.identifier ?? "",
           "isSelected": selectedOption == option,
