@@ -69,13 +69,24 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  Future<void> _openSettings() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+    await _loadSettings();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: LiquidGlassTheme.background,
       body: SafeArea(
         child: _embySettings.hasToken
-            ? EmbyBrowserScreen(settings: _embySettings)
+            ? EmbyBrowserScreen(
+                settings: _embySettings,
+                onOpenSettings: _openSettings,
+              )
             : _buildWelcomeScreen(),
       ),
     );
@@ -115,13 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 48),
             ElevatedButton.icon(
-              onPressed: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                );
-                _loadSettings();
-              },
+              onPressed: _openSettings,
               icon: const Icon(Icons.settings_outlined),
               label: const Text('连接服务器'),
               style: ElevatedButton.styleFrom(

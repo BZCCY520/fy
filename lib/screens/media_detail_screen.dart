@@ -27,8 +27,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen> {
   static const _progressSyncInterval = Duration(seconds: 15);
 
   final _embyClient = EmbyClient();
-  String? _playSessionId;  // 播放会话 ID，用于持续时间报告
-  String? _mediaSourceId;   // 媒体源 ID，用于完整生命周期上报
+  String? _playSessionId; // 播放会话 ID，用于持续时间报告
+  String? _mediaSourceId; // 媒体源 ID，用于完整生命周期上报
   bool _startingPlayback = false;
   bool _loadingDetails = true;
   bool _loadingRecommendations = true;

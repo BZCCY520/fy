@@ -474,11 +474,7 @@ class EmbyClient {
     String? mediaSourceId,
   }) async {
     _ensureAuthorized(settings);
-    final uri = _apiUri(settings.serverUrl, [
-      'Sessions',
-      'Playing',
-      'Stopped',
-    ]);
+    final uri = _apiUri(settings.serverUrl, ['Sessions', 'Playing', 'Stopped']);
     final response = await _client
         .post(
           uri,
@@ -943,7 +939,14 @@ class EmbyClient {
   }
 
   /// iOS AVPlayer 原生支持的容器格式。
-  static const _directPlayContainers = {'mp4', 'm4v', 'mov', 'mp3', 'm4a', 'aac'};
+  static const _directPlayContainers = {
+    'mp4',
+    'm4v',
+    'mov',
+    'mp3',
+    'm4a',
+    'aac',
+  };
 
   /// iOS AVPlayer 原生支持的视频编码。
   static const _directPlayVideoCodecs = {'h264', 'hevc', 'h265', 'mpeg4'};
@@ -952,7 +955,10 @@ class EmbyClient {
   ///
   /// 容器或视频编码任一不被支持时返回 false，调用方应直接走 HLS 转码流，
   /// 避免在原生侧等待加载失败再回退。信息缺失时保守地返回 true（仍尝试直连）。
-  bool _isDirectPlaySupported(Map<String, dynamic>? mediaSource, String? container) {
+  bool _isDirectPlaySupported(
+    Map<String, dynamic>? mediaSource,
+    String? container,
+  ) {
     if (container != null && !_directPlayContainers.contains(container)) {
       return false;
     }

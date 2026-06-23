@@ -10,9 +10,17 @@ import '../settings_store.dart';
 import 'media_detail_screen.dart';
 
 class EmbyBrowserScreen extends StatefulWidget {
-  const EmbyBrowserScreen({super.key, required this.settings});
+  const EmbyBrowserScreen({
+    super.key,
+    required this.settings,
+    this.onOpenSettings,
+  });
 
   final EmbySettings settings;
+
+  /// 打开设置页的回调。浏览页是应用根内容，没有可返回的上一页，
+  /// 因此用设置入口替代会导致黑屏的返回操作。
+  final VoidCallback? onOpenSettings;
 
   @override
   State<EmbyBrowserScreen> createState() => _EmbyBrowserScreenState();
@@ -152,8 +160,8 @@ class _EmbyBrowserScreenState extends State<EmbyBrowserScreen>
       child: Row(
         children: [
           LiquidGlassButton(
-            icon: CupertinoIcons.back,
-            onPressed: () => Navigator.pop(context),
+            icon: CupertinoIcons.settings,
+            onPressed: widget.onOpenSettings ?? () {},
             width: 48,
             height: 48,
             padding: EdgeInsets.zero,
