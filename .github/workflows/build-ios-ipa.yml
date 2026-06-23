@@ -60,14 +60,14 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/ios/iphoneos/Runner.app Payload/
-          zip -r ai_subtitle_translator-unsigned.ipa Payload
+          zip -r emby-media-player-unsigned.ipa Payload
           rm -rf Payload
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ai_subtitle_translator-unsigned-ipa
-          path: ai_subtitle_translator-unsigned.ipa
+          name: emby-media-player-unsigned-ipa
+          path: emby-media-player-unsigned.ipa
           retention-days: 30
 
       - name: Generate build summary
@@ -75,13 +75,13 @@ jobs:
           echo "### 🎉 Build Successful!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Build Info:**" >> $GITHUB_STEP_SUMMARY
-          echo "- App Name: AI 字幕" >> $GITHUB_STEP_SUMMARY
-          echo "- Version: 2.0.0" >> $GITHUB_STEP_SUMMARY
-          echo "- Bundle ID: ai_subtitle_translator" >> $GITHUB_STEP_SUMMARY
-          echo "- Platform: iOS 26.0+" >> $GITHUB_STEP_SUMMARY
-          echo "- Design: Liquid Glass" >> $GITHUB_STEP_SUMMARY
+          echo "- App Name: Emby 媒体播放器" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: 3.0.0" >> $GITHUB_STEP_SUMMARY
+          echo "- Bundle ID: com.codex.fanyi.embyMediaPlayer" >> $GITHUB_STEP_SUMMARY
+          echo "- Platform: iOS 13.0+" >> $GITHUB_STEP_SUMMARY
+          echo "- Design: Liquid Glass (iOS 16)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Artifact:** \`ai_subtitle_translator-unsigned.ipa\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifact:** \`emby-media-player-unsigned.ipa\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Download the unsigned IPA from the artifacts section above." >> $GITHUB_STEP_SUMMARY
           echo "You can sign it with AltStore, Sideloadly, or your own signing process." >> $GITHUB_STEP_SUMMARY
