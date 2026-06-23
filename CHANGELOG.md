@@ -6,6 +6,33 @@
 
 ---
 
+## [3.1.0] - 2026-06-21
+
+### ✨ 新增
+
+- **播放会话生命周期（Sessions/Playing）**
+  - `EmbyPlaybackSource` 暴露 `playSessionId` 与 `mediaSourceId`。
+  - 新增 `reportPlaybackStart()`：播放启动后上报 `Sessions/Playing` 开始事件。
+  - 新增 `reportPlaybackStopped()`：离开播放界面时上报 `Sessions/Playing/Stopped`，写入最终续播位置并结束会话。
+  - `updatePlaybackProgress()` 携带 `PlaySessionId` 与 `MediaSourceId`，进度上报归属到正确会话。
+  - 媒体详情页在播放开始、进度同步、退出三处贯穿同一会话标识，形成完整生命周期。
+
+### 🐛 修复
+
+- **视频无法播放**
+  - iOS 原生播放器此前在 `present` 完成回调里立即返回成功，从不观察 `AVPlayerItem.status`，导致媒体加载失败时不抛错、Dart 端 HLS 回退永不触发，用户只见黑屏。
+  - 现通过 KVO 观察播放项状态：`readyToPlay` 才返回成功，`failed` 返回错误并收起播放器，叠加 30 秒超时保护。
+  - `EmbyPlaybackSource` 新增 `directPlaySupported`，依据容器（mkv/avi 等）与视频编码判断是否可直连；不可直连时直接走 HLS 转码流，避免等待加载失败再回退。
+
+### 🧪 测试
+
+- `flutter analyze`：无问题。
+- `flutter test`：16/16 通过。
+- 新增 `Sessions/Playing` 开始 / 停止上报单测，覆盖会话标识透传。
+- 新增直连兼容性判定单测（mkv/hevc 标记为不可直连）。
+
+---
+
 ## [3.0.0] - 2026-06-18
 
 ### 🎉 重大更新
@@ -86,16 +113,12 @@
 
 ## 版本计划
 
-### [3.1.0] - 计划中
-
-- [ ] 播放进度周期性同步
-- [ ] 多服务器管理
-- [ ] 字幕轨道选择与样式
-- [ ] 手势控制
-- [ ] AirPlay 优化
-
 ### [3.2.0] - 计划中
 
+- [ ] 多服务器管理
+- [ ] 字幕轨道选择与样式
+- [ ] 手势控制（音量、亮度、进度）
+- [ ] AirPlay 优化
 - [ ] 离线下载
 - [ ] 播放列表
 - [ ] 深色模式

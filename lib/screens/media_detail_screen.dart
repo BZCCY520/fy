@@ -27,6 +27,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen> {
   static const _progressSyncInterval = Duration(seconds: 15);
 
   final _embyClient = EmbyClient();
+  String? _playSessionId;  // 播放会话 ID，用于持续时间报告
+  String? _mediaSourceId;   // 媒体源 ID，用于完整生命周期上报
   bool _startingPlayback = false;
   bool _loadingDetails = true;
   bool _loadingRecommendations = true;
@@ -117,18 +119,30 @@ class _MediaDetailScreenState extends State<MediaDetailScreen> {
 
       if (!mounted) return;
 
-      try {
-        await NativePlayerBridge.play(
-          url: source.directStreamUri.toString(),
-          headers: source.headers,
-          enableDolby: true,
-          startPositionSeconds: _resumeSeconds,
-        );
-      } catch (directError) {
-        final hlsUri = source.hlsStreamUri;
-        if (hlsUri == null) {
-          rethrow;
+      // 直连可播则优先直连，失败回退 HLS；不可直连（如 mkv）直接走 HLS 转码。
+      if (source.directPlaySupported) {
+        try {
+          await NativePlayerBridge.play(
+            url: source.directStreamUri.toString(),
+            headers: source.headers,
+            enableDolby: true,
+            startPositionSeconds: _resumeSeconds,
+          );
+        } catch (directError) {
+          debugPrint('Direct play failed, falling back to HLS: $directError');
+          final hlsUri = source.hlsStreamUri;
+          if (hlsUri == null) {
+            rethrow;
+          }
+          await NativePlayerBridge.play(
+            url: hlsUri.toString(),
+            headers: source.headers,
+            enableDolby: true,
+            startPositionSeconds: _resumeSeconds,
+          );
         }
+      } else {
+        final hlsUri = source.hlsStreamUri ?? source.directStreamUri;
         await NativePlayerBridge.play(
           url: hlsUri.toString(),
           headers: source.headers,
@@ -139,7 +153,26 @@ class _MediaDetailScreenState extends State<MediaDetailScreen> {
 
       if (!mounted) return;
 
+      _playSessionId = source.playSessionId;
+      _mediaSourceId = source.mediaSourceId;
       _reportedPlayed = _item.isPlayed == true;
+
+      // 上报播放开始，让服务器记录"正在播放"会话。失败不阻断播放。
+      final startPosition = _item.playbackPosition ?? Duration.zero;
+      unawaited(
+        _embyClient
+            .reportPlaybackStart(
+              settings: widget.settings,
+              itemId: _item.id,
+              position: startPosition,
+              playSessionId: _playSessionId,
+              mediaSourceId: _mediaSourceId,
+            )
+            .catchError((Object error) {
+              debugPrint('Failed to report playback start: $error');
+            }),
+      );
+
       _startProgressSync();
 
       ScaffoldMessenger.of(
@@ -200,6 +233,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen> {
         position: position,
         runtime: runtime,
         isPaused: isPaused,
+        playSessionId: _playSessionId,
+        mediaSourceId: _mediaSourceId,
       );
 
       _lastSyncedPosition = position;
@@ -261,7 +296,36 @@ class _MediaDetailScreenState extends State<MediaDetailScreen> {
   @override
   void dispose() {
     _progressSyncTimer?.cancel();
+    _reportPlaybackStopped();
     super.dispose();
+  }
+
+  /// 离开界面时上报播放停止，写入最终续播位置并结束 Emby 会话。
+  ///
+  /// dispose 不能 await，这里 fire-and-forget；settings 与位置已在调用前捕获，
+  /// 不依赖 State 生命周期。
+  void _reportPlaybackStopped() {
+    if (_playSessionId == null && _mediaSourceId == null) {
+      // 从未真正发起过原生播放，无需上报。
+      return;
+    }
+    final position = _lastSyncedPosition;
+    if (position == null) {
+      return;
+    }
+    unawaited(
+      _embyClient
+          .reportPlaybackStopped(
+            settings: widget.settings,
+            itemId: _item.id,
+            position: position,
+            playSessionId: _playSessionId,
+            mediaSourceId: _mediaSourceId,
+          )
+          .catchError((Object error) {
+            debugPrint('Failed to report playback stopped: $error');
+          }),
+    );
   }
 
   @override

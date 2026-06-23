@@ -135,11 +135,50 @@ void main() {
     expect(source.directStreamUri.queryParameters['api_key'], 'token-123');
     expect(source.directStreamUri.queryParameters['MediaSourceId'], 'source-1');
     expect(source.directStreamUri.queryParameters['AudioStreamIndex'], '1');
+    expect(source.playSessionId, 'play-session');
+    expect(source.mediaSourceId, 'source-1');
+    // 该测试媒体源是 mkv 容器，不被原生播放器直连支持。
+    expect(source.directPlaySupported, isFalse);
     expect(
       source.hlsStreamUri.toString(),
       contains('/emby/Videos/movie-1/master.m3u8'),
     );
     expect(source.headers['X-Emby-Token'], 'token-123');
+  });
+
+  test('marks mkv container as not direct-play supported', () async {
+    final client = EmbyClient(
+      client: MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'PlaySessionId': 'play-session',
+            'MediaSources': [
+              {
+                'Id': 'source-1',
+                'Container': 'mkv',
+                'MediaStreams': [
+                  {'Type': 'Video', 'Index': 0, 'Codec': 'hevc'},
+                  {'Type': 'Audio', 'Index': 1, 'IsDefault': true},
+                ],
+              },
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+
+    final source = await client.getPlaybackSource(
+      settings: testSettings,
+      itemId: 'movie-1',
+    );
+
+    expect(source.directPlaySupported, isFalse);
+    expect(
+      source.hlsStreamUri.toString(),
+      contains('/emby/Videos/movie-1/master.m3u8'),
+    );
   });
 
   test('fetches media details with user data and people', () async {
@@ -235,6 +274,8 @@ void main() {
       position: const Duration(minutes: 2),
       runtime: const Duration(hours: 1),
       isPaused: true,
+      playSessionId: 'play-session',
+      mediaSourceId: 'source-1',
     );
 
     expect(capturedRequest.method, 'POST');
@@ -244,6 +285,48 @@ void main() {
     expect(body['PositionTicks'], 1200000000);
     expect(body['RunTimeTicks'], 36000000000);
     expect(body['IsPaused'], isTrue);
+    expect(body['PlaySessionId'], 'play-session');
+    expect(body['MediaSourceId'], 'source-1');
+  });
+
+  test('reports playback start and stopped with session id', () async {
+    final requests = <http.Request>[];
+    final client = EmbyClient(
+      client: MockClient((request) async {
+        requests.add(request);
+        return http.Response('', 204);
+      }),
+    );
+
+    await client.reportPlaybackStart(
+      settings: testSettings,
+      itemId: 'movie-1',
+      position: const Duration(seconds: 30),
+      playSessionId: 'play-session',
+      mediaSourceId: 'source-1',
+    );
+    await client.reportPlaybackStopped(
+      settings: testSettings,
+      itemId: 'movie-1',
+      position: const Duration(minutes: 5),
+      playSessionId: 'play-session',
+      mediaSourceId: 'source-1',
+    );
+
+    expect(requests[0].method, 'POST');
+    expect(requests[0].url.path, '/emby/Sessions/Playing');
+    final startBody = jsonDecode(requests[0].body) as Map<String, dynamic>;
+    expect(startBody['ItemId'], 'movie-1');
+    expect(startBody['PositionTicks'], 300000000);
+    expect(startBody['PlaySessionId'], 'play-session');
+    expect(startBody['MediaSourceId'], 'source-1');
+
+    expect(requests[1].method, 'POST');
+    expect(requests[1].url.path, '/emby/Sessions/Playing/Stopped');
+    final stoppedBody = jsonDecode(requests[1].body) as Map<String, dynamic>;
+    expect(stoppedBody['ItemId'], 'movie-1');
+    expect(stoppedBody['PositionTicks'], 3000000000);
+    expect(stoppedBody['PlaySessionId'], 'play-session');
   });
 
   test('marks played and toggles favorite endpoints', () async {

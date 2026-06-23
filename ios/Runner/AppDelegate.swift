@@ -34,6 +34,8 @@ private final class NativePlayerController: NSObject {
   private var player: AVPlayer?
   private var playerViewController: AVPlayerViewController?
   private var preferredRate: Float = 1.0
+  private var statusObservation: NSKeyValueObservation?
+  private var loadTimeoutWorkItem: DispatchWorkItem?
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
@@ -168,20 +170,68 @@ private final class NativePlayerController: NSObject {
         self.playerViewController = playerViewController
         self.preferredRate = 1.0
 
-        presenter.present(playerViewController, animated: true) {
-          let startPlayback = {
-            player.play()
+        // 只回调一次：readyToPlay -> 成功，failed/超时 -> 失败并触发 Dart 端回退。
+        var didComplete = false
+        let complete: (FlutterError?) -> Void = { [weak self] error in
+          guard !didComplete else { return }
+          didComplete = true
+          self?.statusObservation = nil
+          self?.loadTimeoutWorkItem?.cancel()
+          self?.loadTimeoutWorkItem = nil
+          if let error {
+            // 加载失败时收起播放器，避免留下黑屏，并让 Dart 端尝试 HLS 回退。
+            self?.stopPlayback(animated: false) {
+              result(error)
+            }
+          } else {
             result(true)
+          }
+        }
+
+        let beginPlayback = {
+          let startPlaying = {
+            player.rate = self.preferredRate
+            complete(nil)
           }
           if startPositionSeconds > 0 {
             let startTime = CMTime(seconds: startPositionSeconds, preferredTimescale: 600)
             player.seek(to: startTime, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
-              startPlayback()
+              startPlaying()
             }
           } else {
-            startPlayback()
+            startPlaying()
           }
         }
+
+        self.statusObservation = item.observe(\.status, options: [.new]) { observedItem, _ in
+          switch observedItem.status {
+          case .readyToPlay:
+            beginPlayback()
+          case .failed:
+            let message = observedItem.error?.localizedDescription
+              ?? "无法加载该媒体源，可能是编码或容器不被原生播放器支持。"
+            complete(
+              FlutterError(code: "playback_item_failed", message: message, details: nil)
+            )
+          default:
+            break
+          }
+        }
+
+        // 超时保护：避免在某些不可播放的源上一直挂起，到时返回失败触发回退。
+        let timeout = DispatchWorkItem {
+          complete(
+            FlutterError(
+              code: "playback_timeout",
+              message: "媒体加载超时，请检查网络或改用转码流。",
+              details: nil
+            )
+          )
+        }
+        self.loadTimeoutWorkItem = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: timeout)
+
+        presenter.present(playerViewController, animated: true, completion: nil)
       }
     }
   }
@@ -328,6 +378,9 @@ private final class NativePlayerController: NSObject {
   }
 
   private func stopPlayback(animated: Bool, completion: @escaping () -> Void) {
+    statusObservation = nil
+    loadTimeoutWorkItem?.cancel()
+    loadTimeoutWorkItem = nil
     player?.pause()
 
     guard let playerViewController else {

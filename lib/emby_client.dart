@@ -173,11 +173,26 @@ class EmbyPlaybackSource {
     required this.directStreamUri,
     required this.headers,
     this.hlsStreamUri,
+    this.playSessionId,
+    this.mediaSourceId,
+    this.directPlaySupported = true,
   });
 
   final Uri directStreamUri;
   final Uri? hlsStreamUri;
   final Map<String, String> headers;
+
+  /// Emby 为本次播放分配的会话 ID，用于贯穿 Sessions/Playing 生命周期上报。
+  final String? playSessionId;
+
+  /// 实际使用的媒体源 ID，进度上报时一并回传给服务器。
+  final String? mediaSourceId;
+
+  /// 直连流是否能被 iOS 原生播放器直接播放。
+  ///
+  /// 对于 AVPlayer 不支持的容器（如 mkv / avi / flv），应直接走 HLS 转码流，
+  /// 避免在原生侧等待加载失败再回退，提升首帧速度。
+  final bool directPlaySupported;
 }
 
 class EmbyClient {
@@ -378,6 +393,8 @@ class EmbyClient {
     required Duration position,
     Duration? runtime,
     bool isPaused = false,
+    String? playSessionId,
+    String? mediaSourceId,
   }) async {
     _ensureAuthorized(settings);
     final uri = _apiUri(settings.serverUrl, [
@@ -395,6 +412,84 @@ class EmbyClient {
             if (runtime != null) 'RunTimeTicks': _durationToTicks(runtime),
             'IsPaused': isPaused,
             'CanSeek': true,
+            if (playSessionId != null && playSessionId.isNotEmpty)
+              'PlaySessionId': playSessionId,
+            if (mediaSourceId != null && mediaSourceId.isNotEmpty)
+              'MediaSourceId': mediaSourceId,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final decodedText = utf8.decode(response.bodyBytes);
+      throw Exception(_extractErrorMessage(decodedText, response.statusCode));
+    }
+  }
+
+  /// 上报播放开始事件（Sessions/Playing）。
+  ///
+  /// 让 Emby 服务器在"正在播放"列表中记录本次会话，并支持后续的进度
+  /// 同步和停止上报形成完整生命周期。
+  Future<void> reportPlaybackStart({
+    required EmbySettings settings,
+    required String itemId,
+    Duration position = Duration.zero,
+    String? playSessionId,
+    String? mediaSourceId,
+  }) async {
+    _ensureAuthorized(settings);
+    final uri = _apiUri(settings.serverUrl, ['Sessions', 'Playing']);
+    final response = await _client
+        .post(
+          uri,
+          headers: _jsonAuthorizedHeaders(settings.accessToken),
+          body: jsonEncode({
+            'ItemId': itemId,
+            'PositionTicks': _durationToTicks(position),
+            'IsPaused': false,
+            'CanSeek': true,
+            'PlayMethod': 'DirectStream',
+            if (playSessionId != null && playSessionId.isNotEmpty)
+              'PlaySessionId': playSessionId,
+            if (mediaSourceId != null && mediaSourceId.isNotEmpty)
+              'MediaSourceId': mediaSourceId,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final decodedText = utf8.decode(response.bodyBytes);
+      throw Exception(_extractErrorMessage(decodedText, response.statusCode));
+    }
+  }
+
+  /// 上报播放停止事件（Sessions/Playing/Stopped）。
+  ///
+  /// 在离开播放界面或播放结束时调用，写入最终续播位置并结束会话。
+  Future<void> reportPlaybackStopped({
+    required EmbySettings settings,
+    required String itemId,
+    required Duration position,
+    String? playSessionId,
+    String? mediaSourceId,
+  }) async {
+    _ensureAuthorized(settings);
+    final uri = _apiUri(settings.serverUrl, [
+      'Sessions',
+      'Playing',
+      'Stopped',
+    ]);
+    final response = await _client
+        .post(
+          uri,
+          headers: _jsonAuthorizedHeaders(settings.accessToken),
+          body: jsonEncode({
+            'ItemId': itemId,
+            'PositionTicks': _durationToTicks(position),
+            if (playSessionId != null && playSessionId.isNotEmpty)
+              'PlaySessionId': playSessionId,
+            if (mediaSourceId != null && mediaSourceId.isNotEmpty)
+              'MediaSourceId': mediaSourceId,
           }),
         )
         .timeout(const Duration(seconds: 30));
@@ -552,6 +647,7 @@ class EmbyClient {
     final directStreamUrl = mediaSource?['DirectStreamUrl']?.toString();
     final container = _safeContainer(mediaSource?['Container']?.toString());
     final audioStreamIndex = _defaultAudioStreamIndex(mediaSource);
+    final directPlaySupported = _isDirectPlaySupported(mediaSource, container);
 
     // 构建直接流 URL，优先使用服务器返回的 DirectStreamUrl
     final directQuery = <String, String>{'Static': 'true', 'api_key': token};
@@ -601,6 +697,9 @@ class EmbyClient {
         itemId,
         'master.m3u8',
       ], hlsQuery),
+      playSessionId: playSessionId,
+      mediaSourceId: mediaSourceId,
+      directPlaySupported: directPlaySupported,
       headers: {
         'X-Emby-Token': token,
         'X-MediaBrowser-Token': token,
@@ -841,6 +940,41 @@ class EmbyClient {
         .map((part) => part.trim().toLowerCase())
         .firstWhere((part) => part.isNotEmpty, orElse: () => 'mp4');
     return first.replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
+  /// iOS AVPlayer 原生支持的容器格式。
+  static const _directPlayContainers = {'mp4', 'm4v', 'mov', 'mp3', 'm4a', 'aac'};
+
+  /// iOS AVPlayer 原生支持的视频编码。
+  static const _directPlayVideoCodecs = {'h264', 'hevc', 'h265', 'mpeg4'};
+
+  /// 判断该媒体源能否被 iOS 原生播放器直接播放。
+  ///
+  /// 容器或视频编码任一不被支持时返回 false，调用方应直接走 HLS 转码流，
+  /// 避免在原生侧等待加载失败再回退。信息缺失时保守地返回 true（仍尝试直连）。
+  bool _isDirectPlaySupported(Map<String, dynamic>? mediaSource, String? container) {
+    if (container != null && !_directPlayContainers.contains(container)) {
+      return false;
+    }
+    final mediaStreams = mediaSource?['MediaStreams'];
+    if (mediaStreams is! List) {
+      return true;
+    }
+    for (final stream in mediaStreams) {
+      if (stream is! Map<String, dynamic>) {
+        continue;
+      }
+      if (stream['Type']?.toString().toLowerCase() != 'video') {
+        continue;
+      }
+      final codec = stream['Codec']?.toString().toLowerCase();
+      if (codec != null &&
+          codec.isNotEmpty &&
+          !_directPlayVideoCodecs.contains(codec)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   String? _defaultAudioStreamIndex(Map<String, dynamic>? mediaSource) {

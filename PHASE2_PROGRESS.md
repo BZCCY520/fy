@@ -68,6 +68,21 @@
 - 更新 iOS 应用名与 Bundle ID：`com.codex.fanyi.embyMediaPlayer`。
 - 文档同步到 Emby 媒体播放器定位。
 
+### 播放会话生命周期
+
+- `EmbyPlaybackSource` 新增暴露 `playSessionId` 与 `mediaSourceId`。
+- 新增 `reportPlaybackStart()`：播放启动后调用 `Sessions/Playing`，让服务器记录"正在播放"会话。
+- 新增 `reportPlaybackStopped()`：离开详情页时调用 `Sessions/Playing/Stopped`，写入最终续播位置并结束会话。
+- `updatePlaybackProgress()` 现在携带 `PlaySessionId` 与 `MediaSourceId`，进度上报归属到正确会话。
+- 媒体详情页在播放开始 / 进度同步 / 退出三处贯穿 `PlaySessionId`，形成完整生命周期。
+- start / stopped 上报均为 fire-and-forget，失败仅记录日志，不阻断播放或界面退出。
+
+### 修复视频无法播放
+
+- iOS 原生播放器改为 KVO 观察 `AVPlayerItem.status`：`readyToPlay` 才回调成功，`failed` 回调错误并收起播放器，并加 30 秒超时保护。此前无论媒体能否加载都立即返回成功，导致 Dart 端 HLS 回退永不触发、用户只见黑屏。
+- `EmbyPlaybackSource` 新增 `directPlaySupported`，按容器与视频编码判定是否可直连；不可直连（mkv/avi/hevc-in-mkv 等）直接走 HLS 转码流。
+- 媒体详情页播放逻辑：可直连则"直连→失败回退 HLS"，不可直连则直接 HLS。
+
 ## 验证结果
 
 ```bash
@@ -75,7 +90,7 @@ flutter analyze
 # No issues found
 
 flutter test
-# 14/14 passed
+# 16/16 passed
 ```
 
 ## 待继续
@@ -86,6 +101,8 @@ flutter test
    - 起始时间 seek。
    - 多音轨查询/切换。
    - 字幕轨道查询/切换。
-2. 播放会话精细化：
-   - 接入 Emby `Sessions/Playing` 开始事件。
-   - 携带 `PlaySessionId` 做更完整的播放进度生命周期。
+   - `Sessions/Playing` 会话在 Emby 后台"正在播放"列表正确出现与消失。
+2. 播放控制增强：
+   - 手势控制（音量、亮度、进度）。
+   - 字幕样式与播放速率 UI。
+   - AirPlay 优化。
